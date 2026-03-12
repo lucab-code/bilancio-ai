@@ -1,13 +1,11 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
-import passport from "passport";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
 const app = express();
 const httpServer = createServer(app);
-
-app.use(passport.initialize());
 
 declare module "http" {
   interface IncomingMessage {
@@ -63,6 +61,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const { loadConfig } = await import("./config");
+  await loadConfig();
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

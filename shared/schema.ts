@@ -4,6 +4,7 @@ import { z } from "zod";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
+  authId: text("auth_id"), // Supabase auth.user id (uuid)
   email: text("email").notNull(),
   passwordHash: text("password_hash").notNull(),
   name: text("name"),
@@ -29,6 +30,12 @@ export const analyses = pgTable("analyses", {
 export const sessions = pgTable("sessions", {
   token: text("token").primaryKey(),
   userId: integer("user_id").notNull(),
+});
+
+// Chiavi API e config (Supabase / env)
+export const appConfig = pgTable("app_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
 });
 
 // Cache bilanci Camera di Commercio (evita ri-acquisto)

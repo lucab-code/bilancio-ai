@@ -10,6 +10,7 @@ export interface IStorage {
   createUser(data: InsertUser): Promise<User>;
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserById(id: number): Promise<User | undefined>;
+  getUserByAuthId(authId: string): Promise<User | undefined>;
 
   // Analyses
   createAnalysis(data: InsertAnalysis): Promise<Analysis>;
@@ -96,6 +97,7 @@ export class FileStorage implements IStorage {
     const id = this.userData.nextUserId++;
     const user: User = {
       id,
+      authId: data.authId ?? null,
       email: data.email,
       passwordHash: data.passwordHash,
       name: data.name ?? null,
@@ -111,6 +113,10 @@ export class FileStorage implements IStorage {
 
   async getUserById(id: number): Promise<User | undefined> {
     return this.userData.users.find(u => u.id === id);
+  }
+
+  async getUserByAuthId(authId: string): Promise<User | undefined> {
+    return this.userData.users.find(u => u.authId === authId);
   }
 
   // Analyses
@@ -211,6 +217,11 @@ export class SupabaseStorage implements IStorage {
 
   async getUserById(id: number): Promise<User | undefined> {
     const [row] = await getDb().select().from(users).where(eq(users.id, id)).limit(1);
+    return row as User | undefined;
+  }
+
+  async getUserByAuthId(authId: string): Promise<User | undefined> {
+    const [row] = await getDb().select().from(users).where(eq(users.authId, authId)).limit(1);
     return row as User | undefined;
   }
 

@@ -9,29 +9,9 @@ import AnalysisPage from "@/pages/analysis";
 import ResultsPage from "@/pages/results";
 import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
+import { supabase } from "./lib/supabase";
 
-const AUTH_STORAGE_KEY = "bilancio_ai_auth";
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
-
-function loadStoredAuth(): { token: string; user: { id: number; email: string; name?: string } } | null {
-  try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (data?.token && data?.user) return data;
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-function saveAuth(token: string, user: { id: number; email: string; name?: string }) {
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ token, user }));
-}
-
-function clearStoredAuth() {
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-}
 
 // Auth context
 interface AuthState {
@@ -67,46 +47,51 @@ function App() {
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    const stored = loadStoredAuth();
-    if (!stored) {
+    if (!supabase) {
       setAuthReady(true);
       return;
     }
-    fetch(`${API_BASE}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${stored.token}` },
-    })
-      .then((res) => {
-        if (res.ok) return res.json();
-        clearStoredAuth();
-        return null;
-      })
-      .then((data) => {
-        if (data?.user) {
-          setToken(stored.token);
+
+    const syncUser = async (accessToken: string | null) => {
+      if (!accessToken) {
+        setToken(null);
+        setUser(null);
+        setAuthReady(true);
+        return;
+      }
+      setToken(accessToken);
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
           setUser(data.user);
+        } else {
+          setUser(null);
         }
-      })
-      .catch(() => clearStoredAuth())
-      .finally(() => setAuthReady(true));
+      } catch {
+        setUser(null);
+      } finally {
+        setAuthReady(true);
+      }
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      syncUser(session?.access_token ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      syncUser(session?.access_token ?? null);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const handleLogin = (newToken: string, newUser: any) => {
-    setToken(newToken);
-    setUser(newUser);
-    saveAuth(newToken, newUser);
-  };
-
-  const handleLogout = () => {
-    const currentToken = token;
+  const handleLogout = async () => {
+    if (supabase) await supabase.auth.signOut();
     setToken(null);
     setUser(null);
-    clearStoredAuth();
-    if (currentToken) {
-      fetch(`${API_BASE}/api/auth/logout`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${currentToken}` },
-      }).catch(() => {});
-    }
   };
 
   if (!authReady) {
@@ -117,10 +102,10 @@ function App() {
     );
   }
 
-  if (!token) {
+  if (!token || !user) {
     return (
       <QueryClientProvider client={queryClient}>
-        <LoginPage onLogin={handleLogin} onGoogleCallbackToken={handleLogin} />
+        <LoginPage onLoggedIn={() => {}} />
         <Toaster />
       </QueryClientProvider>
     );

@@ -1,40 +1,26 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "http";
-import passport from "passport";
-import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import { storage, sessionStore } from "./storage";
-import crypto from "crypto";
-
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:3000";
-const OAUTH_PASSWORD_PLACEHOLDER = crypto.createHash("sha256").update("oauth:google").digest("hex");
-
-// API Credentials (set in .env; no defaults for secrets)
-const OPENAPI_BEARER = process.env.OPENAPI_BEARER || "";
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-// Modello OpenAI per analisi bilancio (Chat GPT-5.3)
-const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5.3-chat-latest";
+import { storage } from "./storage";
+import {
+  getOpenaiApiKey,
+  getOpenaiChatModel,
+  getAuthHeaders,
+} from "./config";
+import { getOrCreateUserFromSupabaseToken, isSupabaseAuthConfigured } from "./supabase-auth";
 
 const COMPANY_BASE = "https://company.openapi.com";
 const DOCUENGINE_BASE = "https://docuengine.openapi.com";
-
-const authHeaders = {
-  Authorization: `Bearer ${OPENAPI_BEARER}`,
-};
 
 // In-memory search result cache (TTL: 10 min)
 const searchCache = new Map<string, { data: any; ts: number }>();
 const CACHE_TTL = 10 * 60 * 1000;
 
-function hashPassword(pw: string): string {
-  return crypto.createHash("sha256").update(pw).digest("hex");
-}
-
-function getUserIdFromReq(req: Request): number | null {
+/** Restituisce il nostro user id se il Bearer token è un Supabase access_token valido. */
+async function getUserIdFromReq(req: Request): Promise<number | null> {
   const token = req.headers.authorization?.replace("Bearer ", "");
   if (!token) return null;
-  return sessionStore.get(token) ?? null;
+  const user = await getOrCreateUserFromSupabaseToken(token);
+  return user?.id ?? null;
 }
 
 // Fetch with retry
@@ -54,138 +40,23 @@ async function fetchWithRetry(url: string, opts: RequestInit, retries = 2): Prom
 export function registerRoutes(server: Server, app: Express): void {
 
   // ==========================================
-  // AUTH — persistent via file storage + Google OAuth
+  // AUTH — Supabase Auth (email + Google)
   // ==========================================
-  const allowRegistration = process.env.ALLOW_REGISTRATION !== "false";
-  const apiOrigin = process.env.API_ORIGIN || FRONTEND_ORIGIN;
-  const googleCallbackUrl = `${apiOrigin}/api/auth/google/callback`;
-
-  if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
-    passport.use(
-      new GoogleStrategy(
-        {
-          clientID: GOOGLE_CLIENT_ID,
-          clientSecret: GOOGLE_CLIENT_SECRET,
-          callbackURL: googleCallbackUrl,
-          scope: ["profile", "email"],
-        },
-        async (_accessToken: string, _refreshToken: string, profile: any, done: (err: any, user?: any) => void) => {
-          try {
-            const email = profile.emails?.[0]?.value?.toLowerCase();
-            if (!email) return done(new Error("Google profile missing email"));
-
-            let user = await storage.getUserByEmail(email);
-            if (!user) {
-              user = await storage.createUser({
-                email,
-                passwordHash: OAUTH_PASSWORD_PLACEHOLDER,
-                name: profile.displayName || profile.name?.givenName || null,
-              });
-            }
-            return done(null, { id: user.id, email: user.email, name: user.name });
-          } catch (e) {
-            return done(e);
-          }
-        }
-      )
-    );
-  }
-
-  app.post("/api/auth/register", async (req: Request, res: Response) => {
-    try {
-      if (!allowRegistration) {
-        return res.status(403).json({ error: "Registrazione disabilitata" });
-      }
-      const { email, password, name } = req.body;
-      if (!email || !password) {
-        return res.status(400).json({ error: "Email e password richiesti" });
-      }
-      if (password.length < 4) {
-        return res.status(400).json({ error: "Password troppo corta (min 4 caratteri)" });
-      }
-      const existing = await storage.getUserByEmail(email.toLowerCase().trim());
-      if (existing) {
-        return res.status(409).json({ error: "Email già registrata" });
-      }
-      const user = await storage.createUser({
-        email: email.toLowerCase().trim(),
-        passwordHash: hashPassword(password),
-        name: name || null,
-      });
-      const token = crypto.randomBytes(32).toString("hex");
-      sessionStore.set(token, user.id);
-      return res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
-    } catch (error: any) {
-      console.error("Register error:", error);
-      return res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post("/api/auth/login", async (req: Request, res: Response) => {
-    try {
-      const { email, password } = req.body;
-      if (!email || !password) {
-        return res.status(400).json({ error: "Email e password richiesti" });
-      }
-      const user = await storage.getUserByEmail(email.toLowerCase().trim());
-      if (!user || user.passwordHash !== hashPassword(password)) {
-        return res.status(401).json({ error: "Credenziali non valide" });
-      }
-      const token = crypto.randomBytes(32).toString("hex");
-      sessionStore.set(token, user.id);
-      return res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
-    } catch (error: any) {
-      console.error("Login error:", error);
-      return res.status(500).json({ error: error.message });
-    }
-  });
-
   app.get("/api/auth/config", (_req: Request, res: Response) => {
-    const hasGoogle = !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
-    return res.json({ allowRegistration, hasGoogle });
+    return res.json({
+      useSupabaseAuth: isSupabaseAuthConfigured(),
+      allowRegistration: true,
+      hasGoogle: true,
+    });
   });
 
   app.get("/api/auth/me", async (req: Request, res: Response) => {
-    const userId = getUserIdFromReq(req);
-    if (!userId) return res.status(401).json({ error: "Non autenticato" });
-    const user = await storage.getUserById(userId);
-    if (!user) return res.status(401).json({ error: "Utente non trovato" });
-    return res.json({ user: { id: user.id, email: user.email, name: user.name } });
-  });
-
-  app.post("/api/auth/logout", async (req: Request, res: Response) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
-    if (token) sessionStore.delete(token);
-    return res.json({ ok: true });
+    if (!token) return res.status(401).json({ error: "Non autenticato" });
+    const user = await getOrCreateUserFromSupabaseToken(token);
+    if (!user) return res.status(401).json({ error: "Token non valido" });
+    return res.json({ user });
   });
-
-  // Google OAuth: start flow (redirect to Google)
-  app.get("/api/auth/google", (req: Request, res: Response, next) => {
-    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-      return res.status(503).json({ error: "Login con Google non configurato" });
-    }
-    passport.authenticate("google", { scope: ["profile", "email"], session: false })(req, res, next);
-  });
-
-  // Google OAuth: callback — issue our token and redirect to frontend
-  app.get(
-    "/api/auth/google/callback",
-    (req: Request, res: Response, next) => {
-      passport.authenticate("google", { session: false }, (err: any, user: any) => {
-        if (err) {
-          const redirectUrl = `${FRONTEND_ORIGIN}/?error=${encodeURIComponent(err.message || "Errore login Google")}`;
-          return res.redirect(redirectUrl);
-        }
-        if (!user) {
-          return res.redirect(`${FRONTEND_ORIGIN}/?error=${encodeURIComponent("Login annullato")}`);
-        }
-        const token = crypto.randomBytes(32).toString("hex");
-        sessionStore.set(token, user.id);
-        const redirectUrl = `${FRONTEND_ORIGIN}/?token=${encodeURIComponent(token)}`;
-        res.redirect(redirectUrl);
-      })(req, res, next);
-    }
-  );
 
   // ==========================================
   // COMPANY SEARCH — SSE streaming, improved
@@ -225,7 +96,7 @@ export function registerRoutes(server: Server, app: Express): void {
       // IT-search returns IDs
       const searchUrl = `${COMPANY_BASE}/IT-search?companyName=${encodeURIComponent(query)}`;
       const searchRes = await fetchWithRetry(searchUrl, {
-        headers: authHeaders,
+        headers: getAuthHeaders(),
         signal: AbortSignal.timeout(12000),
       });
 
@@ -267,7 +138,7 @@ export function registerRoutes(server: Server, app: Express): void {
         const promises = ids.map(async (id: string) => {
           try {
             const startRes = await fetchWithRetry(`${COMPANY_BASE}/IT-start/${id}`, {
-              headers: authHeaders,
+              headers: getAuthHeaders(),
               signal: AbortSignal.timeout(10000),
             }, 1);
             if (!startRes.ok) return;
@@ -318,7 +189,7 @@ export function registerRoutes(server: Server, app: Express): void {
           ids.map(async (id: string) => {
             try {
               const startRes = await fetchWithRetry(`${COMPANY_BASE}/IT-start/${id}`, {
-                headers: authHeaders,
+                headers: getAuthHeaders(),
                 signal: AbortSignal.timeout(10000),
               }, 1);
               if (!startRes.ok) return null;
@@ -366,7 +237,7 @@ export function registerRoutes(server: Server, app: Express): void {
       const id = Array.isArray(req.params.id) ? req.params.id[0] ?? "" : req.params.id ?? "";
 
       const advancedRes = await fetchWithRetry(`${COMPANY_BASE}/IT-advanced/${id}`, {
-        headers: authHeaders,
+        headers: getAuthHeaders(),
         signal: AbortSignal.timeout(15000),
       });
       if (!advancedRes.ok) {
@@ -483,11 +354,11 @@ Dove ANNO è l'anno (es. "2024"), value è l'EBITDA in euro, margin_pct è il ma
       const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          Authorization: `Bearer ${getOpenaiApiKey()}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: OPENAI_CHAT_MODEL,
+          model: getOpenaiChatModel(),
           messages: [
             { role: "system", content: "Sei un analista finanziario. Usa la definizione corretta di EBITDA (EBIT + ammortamenti). Rispondi SOLO con JSON valido, nessun testo aggiuntivo." },
             { role: "user", content: prompt },
@@ -545,7 +416,7 @@ Dove ANNO è l'anno (es. "2024"), value è l'EBITDA in euro, margin_pct è il ma
       const searchRes = await fetch(`${DOCUENGINE_BASE}/requests`, {
         method: "POST",
         headers: {
-          ...authHeaders,
+          ...getAuthHeaders(),
           "Content-Type": "application/json",
         },
         body: JSON.stringify(searchPayload),
@@ -576,7 +447,7 @@ Dove ANNO è l'anno (es. "2024"), value è l'EBITDA in euro, margin_pct è il ma
       const patchRes = await fetch(`${DOCUENGINE_BASE}/requests/${requestId}`, {
         method: "PATCH",
         headers: {
-          ...authHeaders,
+          ...getAuthHeaders(),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ resultId }),
@@ -601,7 +472,7 @@ Dove ANNO è l'anno (es. "2024"), value è l'EBITDA in euro, margin_pct è il ma
       const { requestId } = req.params;
 
       const statusRes = await fetch(`${DOCUENGINE_BASE}/requests/${requestId}`, {
-        headers: authHeaders,
+        headers: getAuthHeaders(),
       });
 
       if (!statusRes.ok) {
@@ -625,7 +496,7 @@ Dove ANNO è l'anno (es. "2024"), value è l'EBITDA in euro, margin_pct è il ma
       const { requestId } = req.params;
 
       const docRes = await fetch(`${DOCUENGINE_BASE}/requests/${requestId}/documents`, {
-        headers: authHeaders,
+        headers: getAuthHeaders(),
       });
 
       if (!docRes.ok) {
@@ -694,11 +565,11 @@ Rispondi SOLO con il JSON, senza markdown o testo aggiuntivo.`;
       const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          Authorization: `Bearer ${getOpenaiApiKey()}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: OPENAI_CHAT_MODEL,
+          model: getOpenaiChatModel(),
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
@@ -725,7 +596,7 @@ Rispondi SOLO con il JSON, senza markdown o testo aggiuntivo.`;
       const analysis = JSON.parse(content);
 
       // Save analysis if user is logged in
-      const userId = getUserIdFromReq(req);
+      const userId = await getUserIdFromReq(req);
       if (userId) {
         await storage.createAnalysis({
           userId,
@@ -770,11 +641,11 @@ Rispondi SOLO in JSON con questa struttura:
       const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          Authorization: `Bearer ${getOpenaiApiKey()}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: OPENAI_CHAT_MODEL,
+          model: getOpenaiChatModel(),
           messages: [
             { role: "system", content: "Sei un esperto di mercato italiano. Rispondi solo in JSON valido." },
             { role: "user", content: prompt },
@@ -805,7 +676,7 @@ Rispondi SOLO in JSON con questa struttura:
   // USER ANALYSES - history
   // ==========================================
   app.get("/api/analyses", async (req: Request, res: Response) => {
-    const userId = getUserIdFromReq(req);
+    const userId = await getUserIdFromReq(req);
     if (!userId) return res.status(401).json({ error: "Non autenticato" });
     const analyses = await storage.listAnalysesByUser(userId);
     return res.json({ data: analyses.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")) });
