@@ -646,7 +646,6 @@ export default function AnalysisPage() {
 
   const analysisProgressState = getAnalysisProgressState(analysisStep, mode, stepElapsedSeconds);
   const analysisProgress = analysisProgressState.progress;
-  const currentStageIndex = getAnalysisStageIndex(analysisStep, mode);
 
   return (
     <div className="min-h-screen bg-background">

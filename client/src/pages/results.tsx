@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
   ArrowLeft, Building2, MapPin, Mail, Phone, Globe, Loader2, FileText,
+  CalendarDays,
   TrendingUp, TrendingDown, Minus, Target, Users, ShieldCheck, AlertTriangle, Lightbulb,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,17 @@ function formatDateTime(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("it-IT");
+}
+
+function extractYear(value?: string | null): string | null {
+  if (!value) return null;
+
+  const yearMatch = value.match(/\b(19|20)\d{2}\b/);
+  if (yearMatch) return yearMatch[0];
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return String(parsed.getFullYear());
 }
 
 function isPdfDocument(document: PurchasedBilancio["documents"][number]): boolean {
@@ -627,6 +639,16 @@ export default function ResultsPage() {
   const formaGiuridica = companyDetails?.forma_giuridica || "";
   const comune = companyDetails?.comune || company?.comune || "";
   const provincia = companyDetails?.provincia || company?.provincia || "";
+  const foundationYearCandidates = [
+    companyDetails?.data_iscrizione,
+    companyDetails?.data_inizio,
+    companyDetails?.dettaglio?.data_inizio_attivita,
+  ]
+    .map((value) => extractYear(typeof value === "string" ? value : null))
+    .filter((year): year is string => Boolean(year));
+  const foundationYear = foundationYearCandidates.length > 0
+    ? String(Math.min(...foundationYearCandidates.map((year) => Number(year))))
+    : null;
   const aiDescriptionText = typeof companyDetails?.aiDescription === "string" ? companyDetails.aiDescription.trim() : "";
   const aiDescriptionSources = Array.isArray(companyDetails?.aiDescriptionSources)
     ? companyDetails.aiDescriptionSources.filter((source: any) => typeof source?.url === "string" && source.url.trim())
@@ -826,6 +848,13 @@ export default function ResultsPage() {
                 <div className="flex items-center gap-2.5">
                   <Globe className="w-4 h-4 text-muted-foreground shrink-0" />
                   <span className="text-foreground">P.IVA: {companyDetails?.partita_iva || company.piva}</span>
+                </div>
+              )}
+
+              {foundationYear && (
+                <div className="flex items-center gap-2.5">
+                  <CalendarDays className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <span className="text-foreground">Anno di fondazione: {foundationYear}</span>
                 </div>
               )}
             </div>
