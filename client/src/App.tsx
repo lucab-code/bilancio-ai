@@ -7,6 +7,7 @@ import { Toaster } from "@/components/ui/toaster";
 import HomePage from "@/pages/home";
 import AnalysisPage from "@/pages/analysis";
 import ResultsPage from "@/pages/results";
+import PricingPage from "@/pages/pricing";
 import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import { supabase } from "./lib/supabase";
@@ -36,6 +37,7 @@ function AppRouter() {
       <Route path="/" component={HomePage} />
       <Route path="/analysis/:mode" component={AnalysisPage} />
       <Route path="/results" component={ResultsPage} />
+      <Route path="/pricing" component={PricingPage} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -47,7 +49,8 @@ function App() {
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       setAuthReady(true);
       return;
     }
@@ -59,29 +62,51 @@ function App() {
         setAuthReady(true);
         return;
       }
-      setToken(accessToken);
       try {
         const res = await fetch(`${API_BASE}/api/auth/me`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
         if (res.ok) {
           const data = await res.json();
+          setToken(accessToken);
           setUser(data.user);
         } else {
+          setToken(null);
           setUser(null);
         }
       } catch {
+        setToken(null);
         setUser(null);
       } finally {
         setAuthReady(true);
       }
     };
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      syncUser(session?.access_token ?? null);
-    });
+    const runAuth = async () => {
+      const hash = window.location.hash.replace(/^#/, "");
+      const params = new URLSearchParams(hash);
+      const accessToken = params.get("access_token");
+      const refreshToken = params.get("refresh_token");
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (accessToken && refreshToken) {
+        try {
+          const { error } = await sb.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+          if (!error) {
+            window.history.replaceState(null, "", window.location.pathname + (window.location.search || "") + "#/");
+            const { data: { session } } = await sb.auth.getSession();
+            await syncUser(session?.access_token ?? null);
+            return;
+          }
+        } catch (_) {}
+      }
+
+      const { data: { session } } = await sb.auth.getSession();
+      await syncUser(session?.access_token ?? null);
+    };
+
+    runAuth();
+
+    const { data: { subscription } } = sb.auth.onAuthStateChange((_event, session) => {
       syncUser(session?.access_token ?? null);
     });
 

@@ -5,8 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import { supabase } from "@/lib/supabase";
+import { PoweredByAttribution } from "@/components/PoweredByAttribution";
 
 function BilancioLogo({ className = "" }: { className?: string }) {
   return (
@@ -88,7 +88,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin + window.location.pathname + window.location.hash },
+      options: { redirectTo: window.location.origin },
     });
     if (error) toast({ title: error.message, variant: "destructive" });
   };
@@ -213,9 +213,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
         </CardContent>
       </Card>
 
-      <div className="mt-8">
-        <PerplexityAttribution />
-      </div>
+      <div className="mt-8 w-full"><PoweredByAttribution /></div>
     </div>
   );
 }

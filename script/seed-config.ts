@@ -28,7 +28,7 @@ async function main() {
 
   const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
   const openapiBearer = process.env.OPENAPI_BEARER ?? "";
-  const openaiChatModel = process.env.OPENAI_CHAT_MODEL ?? "gpt-5.3-chat-latest";
+  const openaiChatModel = process.env.OPENAI_CHAT_MODEL ?? "gpt-5.4";
 
   if (!openaiApiKey || !openapiBearer) {
     console.error("Imposta OPENAI_API_KEY e OPENAPI_BEARER in .env (o sulla riga di comando) e riprova.");
@@ -39,10 +39,21 @@ async function main() {
   const { appConfig } = await import("../shared/schema");
   const db = getDb();
 
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY ?? "";
+  const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+  const stripeProPriceId = process.env.STRIPE_PRO_PRICE_ID ?? "";
+  const stripeBusinessPriceId = process.env.STRIPE_BUSINESS_PRICE_ID ?? "";
+
   const rows = [
     { key: "openai_api_key", value: openaiApiKey },
     { key: "openapi_bearer", value: openapiBearer },
     { key: "openai_chat_model", value: openaiChatModel },
+    ...(stripeSecretKey ? [{ key: "stripe_secret_key", value: stripeSecretKey }] : []),
+    ...(stripeWebhookSecret ? [{ key: "stripe_webhook_secret", value: stripeWebhookSecret }] : []),
+    ...(stripeProPriceId ? [{ key: "stripe_pro_price_id", value: stripeProPriceId }] : []),
+    ...(stripeBusinessPriceId ? [{ key: "stripe_business_price_id", value: stripeBusinessPriceId }] : []),
+    { key: "billing_business_analysis_cents", value: process.env.BILLING_BUSINESS_ANALYSIS_CENTS ?? "1500" },
+    { key: "billing_subscriber_extra_analysis_cents", value: process.env.BILLING_SUBSCRIBER_EXTRA_ANALYSIS_CENTS ?? "1200" },
   ];
 
   for (const row of rows) {

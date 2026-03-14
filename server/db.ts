@@ -15,6 +15,7 @@ export function getDb() {
     max: 10,
     ssl: connectionString.includes("supabase") ? { rejectUnauthorized: false } : undefined,
   });
+  pool.on("error", (err) => console.error("DB pool error:", err.message));
   _db = drizzle(pool, { schema });
   return _db;
 }

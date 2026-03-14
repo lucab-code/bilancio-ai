@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
-import { Search, Building2, Users, MapPin, ArrowLeft, Loader2, Plus, X, Sparkles, Filter } from "lucide-react";
+import { Search, Building2, Users, MapPin, ArrowLeft, Loader2, Plus, X, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -8,8 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import { useAuth } from "@/App";
+import { PoweredByAttribution } from "@/components/PoweredByAttribution";
 
 // API base for deployed proxy
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
@@ -26,8 +26,127 @@ interface CompanyResult {
   stato_attivita?: string;
 }
 
+type FinancialDataState = {
+  bilanci?: Record<string, any>;
+  bilancioData?: any;
+  purchasedBilanci?: Record<string, { year: string; fetchedAt: string; documents: any[]; bilancioData: any }>;
+  latestPurchasedYear?: string | null;
+  targetYears?: string[];
+};
+
+type WalletState = {
+  balanceCents: number;
+  currency: string;
+  businessAnalysisCents: number;
+};
+
+const ANALYSIS_WAIT_MESSAGES = [
+  "Stiamo costruendo il profilo societario e ripulendo i dati grezzi.",
+  "Incrociamo bilanci, anagrafica e segnali pubblici per evitare output vuoti.",
+  "L'AI sta trasformando numeri sparsi in un memo leggibile da investitore.",
+  "Prepariamo grafico, descrizione e key takeaways in un unico passaggio.",
+] as const;
+
+function formatRemainingMinutes(seconds: number | null): string {
+  if (seconds === null) return "Stiamo ancora elaborando oltre il tempo stimato";
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `~${minutes} min rimanenti`;
+}
+
+function formatCents(value: number): string {
+  return new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: "EUR",
+  }).format((value || 0) / 100);
+}
+
+function getHashQueryParam(name: string): string | null {
+  const hash = window.location.hash.replace(/^#/, "");
+  const queryIndex = hash.indexOf("?");
+  if (queryIndex === -1) return null;
+  const query = hash.slice(queryIndex + 1);
+  return new URLSearchParams(query).get(name);
+}
+
+function getTargetBilancioYears(bilanci?: Record<string, any>): string[] {
+  if (!bilanci || typeof bilanci !== "object") return [];
+
+  const years = Object.keys(bilanci)
+    .map((year) => Number.parseInt(year, 10))
+    .filter((year) => Number.isFinite(year))
+    .sort((a, b) => b - a);
+
+  if (years.length === 0) return [];
+
+  const yearSet = new Set(years);
+  const latestYear = years[0];
+  return [latestYear, latestYear - 2]
+    .filter((year) => yearSet.has(year))
+    .map(String);
+}
+
+function getAnalysisProgressState(
+  step: string,
+  mode: "business" | "competitor",
+  stepElapsedSeconds: number,
+): {
+  progress: number;
+  remainingSeconds: number | null;
+  isOvertime: boolean;
+} {
+  const normalized = step.toLowerCase();
+  let minProgress = 12;
+  let maxProgress = 32;
+  let expectedSeconds = 18;
+
+  if (!normalized) {
+    minProgress = 8;
+    maxProgress = 18;
+    expectedSeconds = 8;
+  } else if (normalized.includes("credito")) {
+    minProgress = 10;
+    maxProgress = 18;
+    expectedSeconds = 8;
+  } else if (normalized.includes("dettagli") || normalized.includes("bilanci ottici")) {
+    minProgress = mode === "business" ? 24 : 22;
+    maxProgress = mode === "business" ? 92 : 52;
+    expectedSeconds = mode === "business" ? 150 : 24;
+  } else if (normalized.includes("richiesta bilancio") || normalized.includes("scarico bilanci")) {
+    minProgress = 36;
+    maxProgress = 80;
+    expectedSeconds = 90;
+  } else if (normalized.includes("competitor")) {
+    minProgress = 56;
+    maxProgress = 84;
+    expectedSeconds = 45;
+  } else if (normalized.includes("chatgpt") || normalized.includes("ai")) {
+    minProgress = 72;
+    maxProgress = 95;
+    expectedSeconds = 55;
+  } else if (normalized.includes("cache")) {
+    minProgress = 88;
+    maxProgress = 97;
+    expectedSeconds = 12;
+  }
+
+  const clampedRatio = Math.min(stepElapsedSeconds / expectedSeconds, 1);
+  const easedRatio = 1 - Math.pow(1 - clampedRatio, 1.15);
+  let progress = Math.round(minProgress + (maxProgress - minProgress) * easedRatio);
+  let remainingSeconds: number | null = Math.max(expectedSeconds - stepElapsedSeconds, 1);
+  let isOvertime = false;
+
+  if (stepElapsedSeconds >= expectedSeconds) {
+    isOvertime = true;
+    remainingSeconds = null;
+    const overtimeSeconds = stepElapsedSeconds - expectedSeconds;
+    progress = Math.max(progress, Math.min(97, maxProgress + 1 + Math.floor(overtimeSeconds / 20)));
+  }
+
+  return { progress, remainingSeconds, isOvertime };
+}
+
 // Shared search hook to avoid code duplication
-function useCompanySearch() {
+function useCompanySearch(token: string | null) {
   const [results, setResults] = useState<CompanyResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -51,8 +170,14 @@ function useCompanySearch() {
     try {
       const res = await fetch(
         `${API_BASE}/api/company/search?q=${encodeURIComponent(q)}&mode=sse`,
-        { signal: controller.signal }
+        {
+          signal: controller.signal,
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        }
       );
+      if (!res.ok) {
+        throw new Error(`Search request failed with status ${res.status}`);
+      }
       if (controller.signal.aborted) return;
 
       const reader = res.body?.getReader();
@@ -89,7 +214,7 @@ function useCompanySearch() {
     } finally {
       if (!controller.signal.aborted) setIsSearching(false);
     }
-  }, []);
+  }, [token]);
 
   const debouncedSearch = useCallback((q: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -113,23 +238,27 @@ export default function AnalysisPage() {
 
   // Search state
   const [query, setQuery] = useState("");
-  const [cityFilter, setCityFilter] = useState("");
-  const [showCityFilter, setShowCityFilter] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState<CompanyResult | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
 
-  const mainSearch = useCompanySearch();
+  const mainSearch = useCompanySearch(token);
 
   // Competitor mode state
   const [competitorMode, setCompetitorMode] = useState<"provide" | "ai">("ai");
   const [competitorSearchQuery, setCompetitorSearchQuery] = useState("");
   const [selectedCompetitors, setSelectedCompetitors] = useState<CompanyResult[]>([]);
   const competitorSearchRef = useRef<HTMLDivElement>(null);
-  const compSearch = useCompanySearch();
+  const compSearch = useCompanySearch(token);
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState("");
+  const [walletState, setWalletState] = useState<WalletState | null>(null);
+  const [isLoadingWallet, setIsLoadingWallet] = useState(false);
+  const [waitMessageIndex, setWaitMessageIndex] = useState(0);
+  const [stepElapsedSeconds, setStepElapsedSeconds] = useState(0);
+  const stepStartedAtRef = useRef<number | null>(null);
+  const lastAnalysisStepRef = useRef("");
 
   // Click outside to close dropdowns
   useEffect(() => {
@@ -150,18 +279,6 @@ export default function AnalysisPage() {
     setSelectedCompany(null);
     mainSearch.debouncedSearch(value);
   };
-
-  // Filter results by city client-side
-  const filteredResults = cityFilter.trim()
-    ? mainSearch.results.filter(r => {
-        const cityLower = cityFilter.toLowerCase().trim();
-        return (
-          (r.comune || "").toLowerCase().includes(cityLower) ||
-          (r.provincia || "").toLowerCase().includes(cityLower) ||
-          (r.cap || "").startsWith(cityLower)
-        );
-      })
-    : mainSearch.results;
 
   const selectCompany = (company: CompanyResult) => {
     setSelectedCompany(company);
@@ -193,6 +310,92 @@ export default function AnalysisPage() {
     return fetch(url, { ...opts, headers });
   };
 
+  const loadWalletState = useCallback(async () => {
+    if (!token || mode !== "business") return;
+
+    setIsLoadingWallet(true);
+    try {
+      const res = await authFetch(`${API_BASE}/api/billing/me`);
+      const payload = await res.json().catch(() => ({}));
+      if (res.ok && payload?.data) {
+        setWalletState(payload.data);
+      }
+    } catch (error) {
+      console.error("Wallet load failed", error);
+    } finally {
+      setIsLoadingWallet(false);
+    }
+  }, [token, mode]);
+
+  const redirectToCheckout = useCallback(async (topUpCents?: number) => {
+    const res = await authFetch(`${API_BASE}/api/billing/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topUpCents }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || !payload?.data?.url) {
+      throw new Error(payload?.error || "Impossibile avviare il pagamento");
+    }
+
+    window.location.href = payload.data.url;
+  }, [token]);
+
+  useEffect(() => {
+    loadWalletState();
+  }, [loadWalletState]);
+
+  useEffect(() => {
+    if (mode !== "business") return;
+
+    const billingState = getHashQueryParam("billing");
+    if (!billingState) return;
+
+    if (billingState === "success") {
+      toast({ title: "Pagamento completato", description: "Credito aggiornato. Ora puoi lanciare l'analisi." });
+      loadWalletState();
+    } else if (billingState === "cancelled") {
+      toast({ title: "Pagamento annullato", description: "Nessun credito e' stato addebitato.", variant: "destructive" });
+    }
+
+    const hash = window.location.hash.replace(/^#/, "");
+    const [path] = hash.split("?");
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${path}`);
+  }, [mode, loadWalletState, toast]);
+
+  useEffect(() => {
+    if (!isAnalyzing) {
+      setWaitMessageIndex(0);
+      setStepElapsedSeconds(0);
+      stepStartedAtRef.current = null;
+      lastAnalysisStepRef.current = "";
+      return;
+    }
+
+    const now = Date.now();
+    if (lastAnalysisStepRef.current !== analysisStep) {
+      lastAnalysisStepRef.current = analysisStep;
+      stepStartedAtRef.current = now;
+      setStepElapsedSeconds(0);
+    }
+
+    const updateTimers = () => {
+      const stepStart = stepStartedAtRef.current ?? now;
+      setStepElapsedSeconds(Math.max(0, Math.floor((Date.now() - stepStart) / 1000)));
+    };
+
+    updateTimers();
+    const timerIntervalId = window.setInterval(updateTimers, 1000);
+    const messageIntervalId = window.setInterval(() => {
+      setWaitMessageIndex((current) => (current + 1) % ANALYSIS_WAIT_MESSAGES.length);
+    }, 2400);
+
+    return () => {
+      window.clearInterval(timerIntervalId);
+      window.clearInterval(messageIntervalId);
+    };
+  }, [analysisStep, isAnalyzing]);
+
   // Start analysis
   const startAnalysis = async () => {
     if (!selectedCompany) {
@@ -203,97 +406,136 @@ export default function AnalysisPage() {
     setIsAnalyzing(true);
 
     try {
-      // Step 1: Get company details
-      setAnalysisStep("Recupero dettagli azienda...");
-      let companyDetails = null;
-      try {
-        const detailRes = await authFetch(`${API_BASE}/api/company/${selectedCompany.id}/details`);
-        if (detailRes.ok) {
-          const detailData = await detailRes.json();
-          companyDetails = detailData.data;
+      if (mode === "business") {
+        setAnalysisStep("Verifico credito disponibile...");
+        const walletRes = await authFetch(`${API_BASE}/api/billing/me`);
+        const walletPayload = await walletRes.json().catch(() => ({}));
+        const balanceCents = walletPayload?.data?.balanceCents ?? walletState?.balanceCents ?? 0;
+        const analysisCostCents = walletPayload?.data?.businessAnalysisCents ?? walletState?.businessAnalysisCents ?? 0;
+
+        if (!walletRes.ok) {
+          throw new Error(walletPayload?.error || "Errore nel recupero del credito");
         }
-      } catch (e) {
-        console.log("Could not fetch details, continuing...");
+
+        setWalletState(walletPayload.data);
+
+        if (analysisCostCents > 0 && balanceCents < analysisCostCents) {
+          const missingCents = analysisCostCents - balanceCents;
+          setIsAnalyzing(false);
+          toast({
+            title: "Credito insufficiente",
+            description: `Servono ${formatCents(missingCents)} per avviare l'analisi business.`,
+            variant: "destructive",
+          });
+          await redirectToCheckout(missingCents);
+          return;
+        }
       }
 
-      // Step 2: Request bilancio
-      setAnalysisStep("Richiesta bilancio alla Camera di Commercio...");
-      let financialData = null;
+      let companyDetails = null;
+      if (mode !== "business") {
+        setAnalysisStep("Recupero dettagli azienda...");
+        try {
+          const detailRes = await authFetch(`${API_BASE}/api/company/${selectedCompany.id}/details`);
+          if (detailRes.ok) {
+            const detailData = await detailRes.json();
+            companyDetails = detailData.data;
+          }
+        } catch (e) {
+          console.log("Could not fetch details, continuing...");
+        }
+      }
+
+      if (mode === "business") {
+        setAnalysisStep("Recupero dettagli azienda e bilanci ottici...");
+        const fullRes = await authFetch(`${API_BASE}/api/company/full-chart-data`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyId: selectedCompany.id,
+            vatCode: selectedCompany.piva,
+            taxCode: selectedCompany.cf,
+          }),
+        });
+
+        const fullData = await fullRes.json();
+        if (!fullRes.ok || !fullData?.data) {
+          if (fullRes.status === 402 && fullData?.code === "INSUFFICIENT_CREDIT") {
+            setIsAnalyzing(false);
+            const missingCents = typeof fullData?.missingCents === "number"
+              ? fullData.missingCents
+              : walletState?.businessAnalysisCents || 0;
+            toast({
+              title: "Credito insufficiente",
+              description: `Servono ${formatCents(missingCents)} per avviare l'analisi business.`,
+              variant: "destructive",
+            });
+            await redirectToCheckout(missingCents);
+            return;
+          }
+          throw new Error(fullData?.error || "Errore nel recupero dati da bilancio ottico");
+        }
+
+        if (walletState) {
+          setWalletState({
+            ...walletState,
+            balanceCents: Math.max(0, walletState.balanceCents - (walletState.businessAnalysisCents || 0)),
+          });
+        }
+
+        const resultData = {
+          company: selectedCompany,
+          companyDetails: fullData.data.companyDetails,
+          financialData: fullData.data.financialData,
+          analysis: null,
+          competitors: null,
+          mode,
+        };
+
+        (window as any).__bilancioResults = resultData;
+        setLocation("/results");
+        return;
+      }
+
+      // Step 2: Request bilancio riclassificato
+      setAnalysisStep("Richiesta bilancio riclassificato alla Camera di Commercio...");
+      let financialData: FinancialDataState | null = null;
       const taxCode = selectedCompany.cf || selectedCompany.piva;
+      const targetYears = getTargetBilancioYears(companyDetails?.dettaglio?.bilanci);
       
       if (taxCode) {
         try {
-          const bilancioRes = await authFetch(`${API_BASE}/api/bilancio/request`, {
+          if (targetYears.length > 0) {
+            setAnalysisStep(`Scarico bilanci riclassificati ${targetYears.join(", ")}...`);
+          }
+
+          const bilancioRes = await authFetch(`${API_BASE}/api/bilancio/ensure-years`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ taxCode }),
+            body: JSON.stringify({
+              companyId: selectedCompany.id,
+              taxCode,
+              targetYears,
+              bilanci: companyDetails?.dettaglio?.bilanci || {},
+            }),
           });
           const bilancioData = await bilancioRes.json();
 
-          if (bilancioData.data?.cached) {
-            setAnalysisStep("Bilancio trovato in cache.");
-            financialData = { bilanci: bilancioData.data.bilanci };
-          } else if (bilancioData.data?.results && bilancioData.data.results.length > 0) {
-            setAnalysisStep("Bilancio trovato. Elaborazione in corso...");
-            
-            const sortedResults = bilancioData.data.results
-              .sort((a: any, b: any) => b.data.balanceSheetDate.localeCompare(a.data.balanceSheetDate));
-            
+          if (bilancioRes.ok && bilancioData.data) {
+            setAnalysisStep(
+              bilancioData.data.downloadedYears?.length > 0
+                ? `Bilanci riclassificati salvati in cache: ${bilancioData.data.downloadedYears.join(", ")}`
+                : "Bilanci riclassificati trovati in cache."
+            );
             financialData = {
-              availableYears: sortedResults.map((r: any) => ({
-                id: r.id,
-                date: r.data.balanceSheetDate,
-                type: r.data.balanceSheetTypeDescription,
-              })),
-              requestId: bilancioData.data.id,
+              bilanci: bilancioData.data.bilanci,
+              purchasedBilanci: bilancioData.data.purchasedBilanci || {},
+              bilancioData: bilancioData.data.bilancioData || null,
+              latestPurchasedYear: bilancioData.data.latestPurchasedYear || null,
+              targetYears: bilancioData.data.targetYears || targetYears,
             };
-
-            if (bilancioData.data.state === "SEARCH" || bilancioData.data.state === "NEW") {
-              const latestResult = sortedResults[0];
-              try {
-                setAnalysisStep(`Scarico bilancio ${latestResult.data.balanceSheetDate}...`);
-                await authFetch(`${API_BASE}/api/bilancio/${bilancioData.data.id}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ resultId: latestResult.id }),
-                });
-                
-                let attempts = 0;
-                while (attempts < 30) {
-                  await new Promise(r => setTimeout(r, 3000));
-                  const statusRes = await authFetch(`${API_BASE}/api/bilancio/${bilancioData.data.id}/status`);
-                  const statusData = await statusRes.json();
-                  
-                  if (statusData.data?.state === "DONE" || statusData.data?.state === "evaso") {
-                    setAnalysisStep("Bilancio pronto. Download dati...");
-                    const docRes = await authFetch(`${API_BASE}/api/bilancio/${bilancioData.data.id}/documents`);
-                    const docData = await docRes.json();
-                    
-                    if (docData.data && docData.data.length > 0) {
-                      try {
-                        const jsonUrl = docData.data[0].downloadUrl;
-                        const jsonRes = await fetch(jsonUrl);
-                        const jsonData = await jsonRes.json();
-                        financialData = { ...financialData, bilancioData: jsonData };
-                      } catch {
-                        console.log("Could not download bilancio JSON");
-                      }
-                    }
-                    break;
-                  }
-                  
-                  if (statusData.data?.state === "ERROR") {
-                    console.error("Bilancio request failed");
-                    break;
-                  }
-                  
-                  setAnalysisStep(`Elaborazione bilancio in corso... (${attempts * 3}s)`);
-                  attempts++;
-                }
-              } catch (e) {
-                console.log("Could not process bilancio, continuing with available data...");
-              }
-            }
+          } else {
+            console.log("Could not ensure target bilanci riclassificati", bilancioData?.error);
           }
         } catch (e) {
           console.log("Bilancio request failed, continuing with company data...");
@@ -327,8 +569,8 @@ export default function AnalysisPage() {
         }
       }
 
-      // Step 4: AI Analysis
-      setAnalysisStep("Analisi AI in corso...");
+      // Step 4: ChatGPT analizza i dati scaricati da OpenAPI (dettaglio azienda + bilancio)
+      setAnalysisStep("ChatGPT analizza i dati OpenAPI...");
       const analyzeRes = await authFetch(`${API_BASE}/api/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -338,18 +580,49 @@ export default function AnalysisPage() {
             ...companyDetails,
             bilanci: companyDetails?.dettaglio?.bilanci,
           },
-          financialData,
+          financialData: financialData ?? {},
           mode,
           competitors,
         }),
       });
+      if (!analyzeRes.ok) {
+        const errBody = await analyzeRes.json().catch(() => ({}));
+        throw new Error(errBody.error || analyzeRes.statusText || "Errore analisi AI");
+      }
       const analyzeData = await analyzeRes.json();
 
-      // Store results and navigate
+      // Garantire che i risultati abbiano sempre bilanci per il grafico EBITDA (da dettaglio, cache o bilancio scaricato)
+      const bilanciFromDetails = companyDetails?.dettaglio?.bilanci || {};
+      const bilanciFromCache = financialData?.bilanci || {};
+      let bilanciToUse = Object.keys(bilanciFromDetails).length > 0 ? bilanciFromDetails : bilanciFromCache;
+      if (Object.keys(bilanciToUse).length === 0 && financialData?.bilancioData) {
+        const b = financialData.bilancioData;
+        const year = b.esercizio ?? b.anno ?? b.year ?? (typeof b.data_chiusura === "string" ? b.data_chiusura.slice(0, 4) : null) ?? new Date().getFullYear().toString();
+        const fatturato = b.ricavi_vendite ?? b.ricavi ?? b.fatturato ?? b.turnover ?? b.valore_produzione ?? b.revenue ?? (b.conto_economico?.ricavi ?? b.conto_economico?.ricavi_vendite) ?? 0;
+        const patrimonioNetto = b.patrimonio_netto ?? b.netWorth ?? b.totale_passivo ?? 0;
+        const costoPersonale = b.costo_personale ?? b.totalStaffCost ?? b.costi_per_il_personale ?? 0;
+        const totaleAttivo = b.totale_attivo ?? b.totalAssets ?? 0;
+        const dipendenti = b.dipendenti ?? b.employees ?? 0;
+        bilanciToUse = {
+          [String(year)]: {
+            data_chiusura_bilancio: b.data_chiusura ?? b.balanceSheetDate ?? "",
+            fatturato: Number(fatturato) || 0,
+            patrimonio_netto: Number(patrimonioNetto) || 0,
+            costo_personale: Number(costoPersonale) || 0,
+            totale_attivo: Number(totaleAttivo) || 0,
+            dipendenti: Number(dipendenti) || 0,
+          },
+        };
+      }
+      const companyDetailsWithBilanci = companyDetails
+        ? { ...companyDetails, dettaglio: { ...companyDetails.dettaglio, bilanci: bilanciToUse } }
+        : { dettaglio: { bilanci: bilanciToUse } };
+      const financialDataWithBilanci = financialData ? { ...financialData, bilanci: bilanciToUse } : { bilanci: bilanciToUse };
+
       const resultData = {
         company: selectedCompany,
-        companyDetails,
-        financialData,
+        companyDetails: companyDetailsWithBilanci,
+        financialData: financialDataWithBilanci,
         analysis: analyzeData.analysis,
         competitors,
         mode,
@@ -370,6 +643,10 @@ export default function AnalysisPage() {
       setAnalysisStep("");
     }
   };
+
+  const analysisProgressState = getAnalysisProgressState(analysisStep, mode, stepElapsedSeconds);
+  const analysisProgress = analysisProgressState.progress;
+  const currentStageIndex = getAnalysisStageIndex(analysisStep, mode);
 
   return (
     <div className="min-h-screen bg-background">
@@ -401,7 +678,7 @@ export default function AnalysisPage() {
             Cerca la tua azienda
           </h2>
           <p className="text-sm text-muted-foreground mb-5">
-            Digita il nome dell'azienda. Puoi filtrare per città per trovare più facilmente.
+            Scrivi nome e localita' nella stessa ricerca, ad esempio `GEL SPA Castelfidardo`.
           </p>
 
           <div ref={searchRef} className="relative">
@@ -409,10 +686,10 @@ export default function AnalysisPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 type="text"
-                placeholder="Nome azienda (es. Moncler SPA, GEL SPA...)"
+                placeholder="Nome azienda o nome + citta' (es. GEL SPA Castelfidardo)"
                 value={query}
                 onChange={(e) => handleQueryChange(e.target.value)}
-                className="pl-10 pr-20 h-12 text-base"
+                className="pl-10 pr-12 h-12 text-base"
                 data-testid="input-company-search"
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -421,53 +698,13 @@ export default function AnalysisPage() {
                     <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
                   </div>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => setShowCityFilter(!showCityFilter)}
-                  data-testid="button-toggle-city-filter"
-                  title="Filtra per città"
-                >
-                  <Filter className="w-3.5 h-3.5" />
-                </Button>
               </div>
             </div>
-
-            {/* City filter row */}
-            {showCityFilter && (
-              <div className="mt-2 fade-in">
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="Filtra per città, provincia o CAP..."
-                    value={cityFilter}
-                    onChange={(e) => setCityFilter(e.target.value)}
-                    className="pl-10 h-10 text-sm"
-                    data-testid="input-city-filter"
-                  />
-                  {cityFilter && (
-                    <button
-                      className="absolute right-3 top-1/2 -translate-y-1/2"
-                      onClick={() => setCityFilter("")}
-                    >
-                      <X className="w-3.5 h-3.5 text-muted-foreground" />
-                    </button>
-                  )}
-                </div>
-                {cityFilter && (
-                  <p className="text-[11px] text-muted-foreground mt-1 ml-1">
-                    {filteredResults.length} risultat{filteredResults.length === 1 ? "o" : "i"} in "{cityFilter}"
-                  </p>
-                )}
-              </div>
-            )}
 
             {/* Dropdown */}
             {mainSearch.showDropdown && (mainSearch.isSearching || mainSearch.results.length > 0) && (
               <div className="absolute z-50 w-full mt-1 bg-popover border border-popover-border rounded-lg shadow-lg max-h-80 overflow-y-auto">
-                {filteredResults.map((company) => (
+                {mainSearch.results.map((company) => (
                   <button
                     key={company.id}
                     onClick={() => selectCompany(company)}
@@ -494,14 +731,9 @@ export default function AnalysisPage() {
                     {mainSearch.results.length === 0 ? "Ricerca in corso..." : "Caricamento altri risultati..."}
                   </div>
                 )}
-                {!mainSearch.isSearching && filteredResults.length === 0 && mainSearch.results.length > 0 && cityFilter && (
-                  <div className="px-4 py-3 text-xs text-muted-foreground">
-                    Nessun risultato per "{cityFilter}". Prova a rimuovere il filtro città.
-                  </div>
-                )}
                 {!mainSearch.isSearching && mainSearch.results.length === 0 && (
                   <div className="px-4 py-3 text-xs text-muted-foreground">
-                    Nessun risultato trovato. Prova un nome diverso.
+                    Nessun risultato trovato. Prova con ragione sociale completa o nome + citta'.
                   </div>
                 )}
               </div>
@@ -671,20 +903,73 @@ export default function AnalysisPage() {
             </Button>
 
             {isAnalyzing && (
-              <div className="mt-4">
-                <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-                  <div className="h-full bg-primary rounded-full pulse-glow" style={{ width: "60%", transition: "width 1s" }} />
+              <Card className="analysis-wait-card relative mt-4 overflow-hidden border-primary/15 bg-[linear-gradient(160deg,rgba(255,255,255,0.96),rgba(239,244,255,0.9)_58%,rgba(228,242,242,0.92))] p-0 shadow-lg">
+                <div className="pointer-events-none absolute inset-0">
+                  <div className="analysis-wait-orb absolute -left-12 top-10 h-28 w-28 rounded-full bg-primary/10 blur-2xl" />
+                  <div className="analysis-wait-orb analysis-wait-orb-delay absolute right-0 top-0 h-36 w-36 rounded-full bg-accent/10 blur-3xl" />
+                  <div className="analysis-wait-grid absolute inset-0 opacity-40" />
                 </div>
-              </div>
+
+                <div className="relative p-5 sm:p-6">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="max-w-lg">
+                      <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary shadow-sm">
+                        <span className="analysis-live-dot h-2 w-2 rounded-full bg-primary" />
+                        Analysis engine
+                      </div>
+                      <h3 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+                        Stiamo assemblando il memo aziendale
+                      </h3>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        {ANALYSIS_WAIT_MESSAGES[waitMessageIndex]}
+                      </p>
+                    </div>
+
+                    <div className="analysis-radar-shell mx-auto w-full max-w-[280px] lg:mx-0">
+                      <div className="analysis-radar-ring analysis-radar-ring-outer" />
+                      <div className="analysis-radar-ring analysis-radar-ring-middle" />
+                      <div className="analysis-radar-ring analysis-radar-ring-inner" />
+                      <div className="analysis-radar-scan" />
+                      <div className="analysis-radar-core shadow-sm">
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-primary/80">
+                          Live step
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-foreground">
+                          {analysisStep}
+                        </div>
+                      </div>
+                      <div className="analysis-radar-pulse analysis-radar-pulse-a" />
+                      <div className="analysis-radar-pulse analysis-radar-pulse-b" />
+                      <div className="analysis-radar-pulse analysis-radar-pulse-c" />
+                    </div>
+                  </div>
+
+                  <div className="mt-5">
+                    <div className="mb-2 flex items-center justify-between text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                      <span>{analysisProgress}%</span>
+                    </div>
+                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200/70">
+                      <div
+                        className="analysis-progress-bar h-full rounded-full"
+                        style={{ width: `${analysisProgress}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span>{formatRemainingMinutes(analysisProgressState.remainingSeconds)}</span>
+                      {analysisProgressState.isOvertime && (
+                        <span>Non e' bloccato, sta ancora elaborando</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </Card>
             )}
           </div>
         )}
       </div>
 
-      <footer className="border-t border-border/50 py-6 px-6 mt-auto">
-        <div className="max-w-4xl mx-auto flex justify-center">
-          <PerplexityAttribution />
-        </div>
+      <footer className="border-t border-border/50 py-6 px-6 mt-auto text-center">
+        <PoweredByAttribution />
       </footer>
     </div>
   );

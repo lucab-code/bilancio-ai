@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -23,6 +24,81 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+function previewBasicAuthEnabled(): boolean {
+  return Boolean(process.env.PREVIEW_BASIC_AUTH_USER?.trim() && process.env.PREVIEW_BASIC_AUTH_PASS?.trim());
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function getPreviewCookieValue(): string {
+  const expectedUser = process.env.PREVIEW_BASIC_AUTH_USER?.trim() || "";
+  const expectedPass = process.env.PREVIEW_BASIC_AUTH_PASS?.trim() || "";
+  return createHash("sha256").update(`${expectedUser}:${expectedPass}`).digest("hex");
+}
+
+function readCookieValue(cookieHeader: string, key: string): string {
+  const cookies = cookieHeader.split(";").map((item) => item.trim());
+  for (const cookie of cookies) {
+    if (!cookie.startsWith(`${key}=`)) continue;
+    return cookie.slice(key.length + 1);
+  }
+  return "";
+}
+
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Frame-Options", "DENY");
+
+  if (!previewBasicAuthEnabled()) {
+    return next();
+  }
+
+  if (req.path === "/api/billing/stripe/webhook") {
+    return next();
+  }
+
+  const previewCookie = readCookieValue(typeof req.headers.cookie === "string" ? req.headers.cookie : "", "bilancio_preview_auth");
+  if (previewCookie && safeEqual(previewCookie, getPreviewCookieValue())) {
+    (req as any).previewAuthorized = true;
+    return next();
+  }
+
+  const authHeader = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
+  if (!authHeader.startsWith("Basic ")) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="BilancioAI Preview"');
+    return res.status(401).send("Authentication required");
+  }
+
+  const encoded = authHeader.slice("Basic ".length).trim();
+  const decoded = Buffer.from(encoded, "base64").toString("utf8");
+  const separatorIndex = decoded.indexOf(":");
+  const username = separatorIndex >= 0 ? decoded.slice(0, separatorIndex) : "";
+  const password = separatorIndex >= 0 ? decoded.slice(separatorIndex + 1) : "";
+
+  const expectedUser = process.env.PREVIEW_BASIC_AUTH_USER?.trim() || "";
+  const expectedPass = process.env.PREVIEW_BASIC_AUTH_PASS?.trim() || "";
+
+  if (!safeEqual(username, expectedUser) || !safeEqual(password, expectedPass)) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="BilancioAI Preview"');
+    return res.status(401).send("Invalid credentials");
+  }
+
+  const secureCookie = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader(
+    "Set-Cookie",
+    `bilancio_preview_auth=${getPreviewCookieValue()}; Path=/; HttpOnly; SameSite=Lax${secureCookie}`,
+  );
+  (req as any).previewAuthorized = true;
+
+  return next();
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -37,23 +113,11 @@ export function log(message: string, source = "express") {
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
+      log(`${req.method} ${path} ${res.statusCode} in ${duration}ms`);
     }
   });
 

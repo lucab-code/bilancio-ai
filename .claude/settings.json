@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"http://localhost:3000/api/company/search?q=openapi\")",
+      "Bash(node -e \":*)",
+      "Bash(curl -s -w \"\\\\n%{http_code}\" \"https://test.company.openapi.com/IT-search?companyName=openapi\" -H \"Authorization: Bearer 69b1f49046869c64810b87a9\")",
+      "Bash(curl -s -w \"\\\\n%{http_code}\" \"https://company.openapi.com/IT-search?companyName=openapi\" -H \"Authorization: Bearer 69b1f49046869c64810b87a9\")",
+      "Bash(curl -s -w \"\\\\n%{http_code}\" \"https://test.company.openapi.com/IT-search?companyName=openapi\")",
+      "Bash(curl -s -w \"\\\\n%{http_code}\" \"https://test.company.openapi.com/IT-search?companyName=openapi\" -H \"Authorization: Bearer test\")",
+      "Bash(xargs -r kill)",
+      "Bash(curl -s -w \"\\\\n%{http_code}\" \"https://test.company.openapi.com/IT-search?companyName=openapi\" -H \"Authorization: Bearer 69b4049e8cf327f4fb0b6f7c\")",
+      "Bash(npx tsx:*)"
+    ]
+  }
+}
