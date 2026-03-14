@@ -169,6 +169,40 @@ function getAnalysisProgressState(
   return { progress, remainingSeconds, isOvertime };
 }
 
+type AnalysisVisualStageState = "done" | "active" | "upcoming";
+
+function getAnalysisVisualStages(
+  mode: "business" | "competitor",
+  step: string,
+): Array<{ label: string; state: AnalysisVisualStageState }> {
+  const stages =
+    mode === "business"
+      ? ["Setup", "Azienda", "Bilanci", "Memo AI"]
+      : ["Setup", "Competitor", "Bilanci", "Memo AI"];
+
+  const normalized = step.toLowerCase();
+  let activeIndex = 0;
+
+  if (!normalized || normalized.includes("credito")) {
+    activeIndex = 0;
+  } else if (normalized.includes("competitor")) {
+    activeIndex = mode === "competitor" ? 1 : 2;
+  } else if (normalized.includes("richiesta bilancio") || normalized.includes("scarico bilanci")) {
+    activeIndex = 2;
+  } else if (normalized.includes("dettagli") || normalized.includes("bilanci ottici")) {
+    activeIndex = mode === "business" ? 1 : 2;
+  } else if (normalized.includes("chatgpt") || normalized.includes("ai") || normalized.includes("cache")) {
+    activeIndex = 3;
+  } else {
+    activeIndex = mode === "business" ? 1 : 2;
+  }
+
+  return stages.map((label, index) => ({
+    label,
+    state: index < activeIndex ? "done" : index === activeIndex ? "active" : "upcoming",
+  }));
+}
+
 // Shared search hook to avoid code duplication
 function useCompanySearch(token: string | null) {
   const [results, setResults] = useState<CompanyResult[]>([]);
@@ -822,6 +856,9 @@ export default function AnalysisPage() {
   const analysisProgress = analysisProgressState.progress;
   const canStartBusinessAnalysis =
     mode !== "business" || documentPreference !== "upload" || uploadedBilanci.length > 0;
+  const analysisVisualStages = getAnalysisVisualStages(mode, analysisStep);
+  const activeAnalysisVisualStage =
+    analysisVisualStages.find((stage) => stage.state === "active")?.label || "Setup";
   const getDocumentPreferenceCardClassName = (value: "upload" | "openapi") =>
     cn(
       "group/document relative flex h-full min-h-[280px] flex-col overflow-hidden rounded-[30px] border p-7 text-left transition-all duration-300",
@@ -1246,7 +1283,7 @@ export default function AnalysisPage() {
 
         {/* Start Analysis Button */}
         {selectedCompany && (
-          <div className="fade-in">
+          <div className="mt-8 sm:mt-10 fade-in">
             <Button
               onClick={startAnalysis}
               disabled={
@@ -1259,8 +1296,12 @@ export default function AnalysisPage() {
             >
               {isAnalyzing ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {analysisStep}
+                  <span className="analysis-button-signal mr-1" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                  <span className="truncate">{analysisStep}</span>
                 </>
               ) : (
                 <>
@@ -1288,27 +1329,49 @@ export default function AnalysisPage() {
                       <h3 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
                         Stiamo assemblando il memo aziendale
                       </h3>
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      <p key={`${analysisStep}-${waitMessageIndex}`} className="mt-2 text-sm leading-6 text-muted-foreground slide-up">
                         {ANALYSIS_WAIT_MESSAGES[waitMessageIndex]}
                       </p>
                     </div>
 
-                    <div className="analysis-radar-shell mx-auto w-full max-w-[280px] lg:mx-0">
-                      <div className="analysis-radar-ring analysis-radar-ring-outer" />
-                      <div className="analysis-radar-ring analysis-radar-ring-middle" />
-                      <div className="analysis-radar-ring analysis-radar-ring-inner" />
-                      <div className="analysis-radar-scan" />
-                      <div className="analysis-radar-core shadow-sm">
+                    <div className="analysis-engine-visual mx-auto w-full max-w-[320px] lg:mx-0">
+                      {analysisVisualStages.map((stage, index) => (
+                        <div
+                          key={stage.label}
+                          data-state={stage.state}
+                          className={cn(
+                            "analysis-engine-node",
+                            `analysis-engine-node-${index}`,
+                            stage.state === "active" && "analysis-stage-active",
+                          )}
+                        >
+                          <span className="analysis-engine-node-dot" />
+                          <span className="analysis-engine-node-label">{stage.label}</span>
+                        </div>
+                      ))}
+
+                      {[0, 1, 2, 3].map((index) => (
+                        <div key={`link-${index}`} className={`analysis-engine-link analysis-engine-link-${index}`} />
+                      ))}
+
+                      {[0, 1, 2, 3].map((index) => (
+                        <div key={`signal-${index}`} className={`analysis-engine-signal analysis-engine-signal-${index}`} aria-hidden="true">
+                          <span />
+                        </div>
+                      ))}
+
+                      <div className="analysis-engine-core shadow-sm">
                         <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-primary/80">
-                          Live step
+                          Live stage
                         </div>
                         <div className="mt-2 text-sm font-semibold text-foreground">
-                          {analysisStep}
+                          {activeAnalysisVisualStage}
                         </div>
                       </div>
-                      <div className="analysis-radar-pulse analysis-radar-pulse-a" />
-                      <div className="analysis-radar-pulse analysis-radar-pulse-b" />
-                      <div className="analysis-radar-pulse analysis-radar-pulse-c" />
+
+                      <div key={analysisStep} className="analysis-engine-ticker slide-up">
+                        {analysisStep}
+                      </div>
                     </div>
                   </div>
 
