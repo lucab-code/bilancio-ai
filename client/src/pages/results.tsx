@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/App";
 import { PoweredByAttribution } from "@/components/PoweredByAttribution";
 import { PremiumGate } from "@/components/PremiumGate";
+import { AppTopBar } from "@/components/AppTopBar";
 import trafficLightAmber from "@/assets/checkpoint/traffic-light-amber.svg";
 import trafficLightGreen from "@/assets/checkpoint/traffic-light-green.svg";
 import trafficLightRed from "@/assets/checkpoint/traffic-light-red.svg";
@@ -1899,22 +1900,35 @@ export default function ResultsPage() {
 
   return (
     <div className="stripe-page min-h-screen bg-background">
-      {/* Header */}
-      <header className="stripe-nav sticky top-0 z-50">
-        <div className="stripe-shell max-w-3xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center">
-          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-            <Button variant="ghost" size="sm" onClick={() => setLocation("/")} data-testid="button-back-home" className="shrink-0 px-2 sm:px-3">
-              <ArrowLeft className="w-4 h-4 sm:mr-1.5" />
+      <AppTopBar
+        maxWidthClassName="max-w-3xl"
+        left={(
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setLocation("/")}
+              data-testid="button-back-home"
+              className="stripe-topbar-chip h-11 shrink-0 rounded-full px-4 text-sm font-medium text-slate-700 hover:bg-white hover:text-slate-950"
+            >
+              <ArrowLeft className="mr-1.5 h-4 w-4" />
               <span className="hidden sm:inline">Nuova analisi</span>
             </Button>
-            <div className="h-5 w-px bg-border shrink-0" />
-            <div className="flex items-center gap-2 min-w-0">
-              <Building2 className="w-4 h-4 text-primary shrink-0" />
-              <span className="font-semibold text-sm truncate">{company.denominazione}</span>
+            <div className="stripe-topbar-divider hidden sm:block" />
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="stripe-topbar-logo h-10 w-10 rounded-[0.9rem]">
+                <Building2 className="h-4 w-4 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                  Report
+                </div>
+                <div className="truncate text-sm font-semibold text-slate-950">{company.denominazione}</div>
+              </div>
             </div>
-          </div>
-        </div>
-      </header>
+          </>
+        )}
+      />
 
       {/* Content */}
       <div className="stripe-shell max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">

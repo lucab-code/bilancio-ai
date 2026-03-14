@@ -6,6 +6,8 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/App";
 import { PoweredByAttribution } from "@/components/PoweredByAttribution";
+import { AppTopBar } from "@/components/AppTopBar";
+import { cn } from "@/lib/utils";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
@@ -209,6 +211,12 @@ export default function HomePage() {
     return Array.from(deduped.values()).slice(0, 6);
   }, [savedAnalyses]);
 
+  const recentCompaniesGridClassName = useMemo(() => {
+    if (recentCompanies.length <= 1) return "grid-cols-1";
+    if (recentCompanies.length === 2) return "md:grid-cols-2";
+    return "md:grid-cols-2 xl:grid-cols-3";
+  }, [recentCompanies.length]);
+
   const openSavedAnalysis = (analysis: SavedAnalysis) => {
     (window as any).__bilancioResults = buildResultDataFromAnalysis(analysis);
     setLocation("/results");
@@ -259,48 +267,70 @@ export default function HomePage() {
 
   return (
     <div className="stripe-page min-h-screen bg-background">
-      {/* Header */}
-      <header className="stripe-nav sticky top-0 z-50">
-        <div className="stripe-shell mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <div className="flex items-center gap-3">
-            <BilancioLogo className="w-8 h-8 text-primary" />
-            <span className="text-lg font-semibold tracking-[-0.04em] text-slate-950">BilancioAI</span>
+      <AppTopBar
+        left={(
+          <div className="stripe-topbar-brand">
+            <div className="stripe-topbar-logo">
+              <BilancioLogo className="h-6 w-6 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-[1.08rem] font-semibold tracking-[-0.05em] text-slate-950">
+                BilancioAI
+              </div>
+              <div className="hidden text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400 sm:block">
+                Financial intelligence
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
+        )}
+        right={(
+          <>
             {token && (
-              <div className="flex items-center gap-3 rounded-full border border-white/80 bg-white/88 px-4 py-2 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.25)]">
-                <div className="flex items-center gap-2 text-sm">
+              <div className="stripe-topbar-chip hidden sm:inline-flex">
+                <div className="flex items-center gap-2 text-sm text-slate-600">
                   <CreditCard className="h-4 w-4 text-primary" />
-                  <span className="hidden sm:inline text-muted-foreground">Credito</span>
-                  <span className="font-semibold text-foreground">
+                  <span className="font-medium text-slate-500">Credito</span>
+                  <span className="font-semibold text-slate-950">
                     {isLoadingWallet ? "..." : formatCents(walletState?.balanceCents || 0)}
                   </span>
                 </div>
                 {walletState?.billingEnabled && (
-                  <Button size="sm" variant="outline" className="h-8" onClick={redirectToCheckout}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-full border-white/90 bg-white px-3 shadow-none"
+                    onClick={redirectToCheckout}
+                  >
                     Ricarica
                   </Button>
                 )}
               </div>
             )}
             {user && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <User className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{user.name || user.email}</span>
+              <div className="stripe-topbar-chip stripe-topbar-chip-muted max-w-[220px]">
+                <User className="h-4 w-4 shrink-0 text-slate-500" />
+                <span className="truncate text-sm font-medium">{user.name || user.email}</span>
               </div>
             )}
-            <Button variant="ghost" size="sm" onClick={logout} data-testid="button-logout">
-              <LogOut className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-      </header>
+            {user && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={logout}
+                data-testid="button-logout"
+                className="h-11 w-11 rounded-2xl border border-white/80 bg-white/82 p-0 text-slate-600 shadow-[0_18px_34px_-30px_rgba(15,23,42,0.24)] hover:bg-white hover:text-slate-950"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            )}
+          </>
+        )}
+      />
 
       {/* Hero */}
       <section className="stripe-shell px-6 pb-20 pt-10">
         <div className="stripe-panel stripe-subtle-grid mx-auto max-w-6xl px-6 py-10 sm:px-10 sm:py-14">
-          <div className="grid items-center gap-10 lg:grid-cols-[1.04fr_0.96fr]">
-          <div className="slide-up text-center lg:text-left">
+          <div className="mx-auto max-w-5xl slide-up text-center lg:text-left">
           <div className="stripe-kicker mb-6">
             <Zap className="w-3.5 h-3.5" />
             Powered by AI e Camera di Commercio
@@ -312,15 +342,15 @@ export default function HomePage() {
               con benchmark e raccomandazioni
             </span>
           </h1>
-          <p className="stripe-lead mb-12 max-w-3xl lg:max-w-xl">
+          <p className="stripe-lead mb-12 max-w-3xl lg:mx-0">
             BilancioAI unisce bilanci ufficiali, confronto con il mercato, lettura di circolante e debito
             e ti lascia usare anche i bilanci che hai gia', se vuoi partire dai tuoi documenti.
           </p>
 
-          <div className="mx-auto grid max-w-5xl gap-5 md:grid-cols-2 lg:mx-0">
+          <div className="mx-auto grid max-w-5xl gap-5 md:grid-cols-2">
             <Link href="/analysis/business">
               <div
-                className="stripe-card-hover group relative flex min-h-[320px] h-full flex-col rounded-[32px] border border-white/80 bg-white/92 p-8 text-left shadow-[0_24px_60px_-42px_rgba(15,23,42,0.28)]"
+                className="stripe-card-hover stripe-hero-card group flex min-h-[320px] h-full flex-col rounded-[32px] p-8 text-left"
                 data-testid="card-business-mode"
               >
                 <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
@@ -345,7 +375,7 @@ export default function HomePage() {
 
             <Link href="/analysis/competitor">
               <div
-                className="stripe-card-hover group relative flex min-h-[320px] h-full flex-col rounded-[32px] border border-white/80 bg-white/92 p-8 text-left shadow-[0_24px_60px_-42px_rgba(15,23,42,0.28)]"
+                className="stripe-card-hover stripe-hero-card group flex min-h-[320px] h-full flex-col rounded-[32px] p-8 text-left"
                 data-testid="card-competitor-mode"
               >
                 <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-accent/15 bg-accent/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
@@ -370,7 +400,7 @@ export default function HomePage() {
 
             <Link href="/analysis/business?intent=target">
               <div
-                className="stripe-card-hover group relative flex min-h-[320px] h-full flex-col rounded-[32px] border border-white/80 bg-white/92 p-8 text-left shadow-[0_24px_60px_-42px_rgba(15,23,42,0.28)]"
+                className="stripe-card-hover stripe-hero-card group flex min-h-[320px] h-full flex-col rounded-[32px] p-8 text-left"
                 data-testid="card-target-mode"
               >
                 <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-emerald-500/15 bg-emerald-500/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-600">
@@ -395,7 +425,7 @@ export default function HomePage() {
 
             <Link href="/analysis/business?intent=explore">
               <div
-                className="stripe-card-hover group relative flex min-h-[320px] h-full flex-col rounded-[32px] border border-white/80 bg-white/92 p-8 text-left shadow-[0_24px_60px_-42px_rgba(15,23,42,0.28)]"
+                className="stripe-card-hover stripe-hero-card group flex min-h-[320px] h-full flex-col rounded-[32px] p-8 text-left"
                 data-testid="card-explore-mode"
               >
                 <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-violet-500/15 bg-violet-500/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-600">
@@ -416,56 +446,6 @@ export default function HomePage() {
                 </div>
               </div>
             </Link>
-          </div>
-          </div>
-
-          <div className="space-y-5">
-            <div className="rounded-[34px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(248,250,255,0.92)_100%)] p-6 shadow-[0_30px_70px_-48px_rgba(15,23,42,0.32)]">
-              <div className="mb-5 flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">Product Preview</div>
-                  <div className="mt-2 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">Check Point</div>
-                </div>
-                <div className="rounded-full border border-primary/15 bg-primary/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
-                  Business
-                </div>
-              </div>
-              <div className="space-y-3">
-                {[
-                  "Crescita",
-                  "Profittabilita'",
-                  "Generazione di cassa",
-                  "Indebitamento",
-                ].map((label, index) => (
-                  <div
-                    key={label}
-                    className="flex items-center justify-between rounded-[26px] border border-[#e6ebf3] bg-white/90 px-5 py-4"
-                  >
-                    <span className="text-[18px] font-semibold tracking-[-0.03em] text-slate-950">{label}</span>
-                    <div className={`h-3.5 w-3.5 rounded-full ${
-                      index === 2 ? "bg-emerald-500" : "bg-amber-500"
-                    } shadow-[0_0_0_8px_rgba(255,255,255,0.9)]`} />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="rounded-[26px] border border-white/80 bg-white/88 p-5 shadow-[0_22px_56px_-46px_rgba(15,23,42,0.32)]">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Analisi salvate</div>
-                <div className="mt-2 text-[30px] font-semibold tracking-[-0.04em] text-slate-950">{savedAnalyses.length}</div>
-              </div>
-              <div className="rounded-[26px] border border-white/80 bg-white/88 p-5 shadow-[0_22px_56px_-46px_rgba(15,23,42,0.32)]">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Societa'</div>
-                <div className="mt-2 text-[30px] font-semibold tracking-[-0.04em] text-slate-950">{recentCompanies.length}</div>
-              </div>
-              <div className="rounded-[26px] border border-white/80 bg-white/88 p-5 shadow-[0_22px_56px_-46px_rgba(15,23,42,0.32)]">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Credito</div>
-                <div className="mt-2 text-[30px] font-semibold tracking-[-0.04em] text-slate-950">
-                  {isLoadingWallet ? "..." : formatCents(walletState?.balanceCents || 0)}
-                </div>
-              </div>
-            </div>
           </div>
           </div>
         </div>
@@ -502,7 +482,7 @@ export default function HomePage() {
               ))}
             </div>
           ) : recentCompanies.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className={cn("grid gap-4", recentCompaniesGridClassName)}>
               {recentCompanies.map((analysis) => {
                 const coveredYears = Array.isArray(analysis.financialData?.coveredYears)
                   ? analysis.financialData.coveredYears

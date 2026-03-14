@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/App";
+import { AppTopBar } from "@/components/AppTopBar";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
@@ -103,14 +104,29 @@ export default function PricingPage() {
 
   return (
     <div className="stripe-page min-h-screen bg-background">
-      <header className="stripe-nav sticky top-0 z-50">
-        <div className="stripe-shell mx-auto flex h-14 max-w-5xl items-center px-4 sm:h-16 sm:px-6">
-          <Button variant="ghost" size="sm" onClick={() => navigate("/")} className="gap-2">
-            <ArrowLeft className="w-4 h-4" />
-            Home
-          </Button>
-        </div>
-      </header>
+      <AppTopBar
+        maxWidthClassName="max-w-5xl"
+        left={(
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate("/")}
+              className="stripe-topbar-chip h-11 rounded-full px-4 text-sm font-medium text-slate-700 hover:bg-white hover:text-slate-950"
+            >
+              <ArrowLeft className="mr-1.5 h-4 w-4" />
+              Home
+            </Button>
+            <div className="stripe-topbar-divider hidden sm:block" />
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                Billing
+              </div>
+              <div className="truncate text-sm font-semibold text-slate-950">Pricing</div>
+            </div>
+          </>
+        )}
+      />
 
       <div className="stripe-shell mx-auto max-w-5xl px-4 py-12 sm:px-6">
         <div className="stripe-panel mb-12 px-6 py-10 text-center sm:px-10 sm:py-14">

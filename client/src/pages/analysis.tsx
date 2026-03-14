@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/App";
 import { PoweredByAttribution } from "@/components/PoweredByAttribution";
+import { AppTopBar } from "@/components/AppTopBar";
+import { cn } from "@/lib/utils";
 
 // API base for deployed proxy
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
@@ -820,34 +822,56 @@ export default function AnalysisPage() {
   const analysisProgress = analysisProgressState.progress;
   const canStartBusinessAnalysis =
     mode !== "business" || documentPreference !== "upload" || uploadedBilanci.length > 0;
+  const getDocumentPreferenceCardClassName = (value: "upload" | "openapi") =>
+    cn(
+      "group/document relative flex h-full min-h-[280px] flex-col overflow-hidden rounded-[30px] border p-7 text-left transition-all duration-300",
+      documentPreference === value
+        ? "border-primary/45 bg-[linear-gradient(180deg,rgba(245,244,255,0.98)_0%,rgba(255,255,255,0.94)_100%)] shadow-[0_30px_80px_-44px_rgba(99,91,255,0.34)] ring-1 ring-primary/15"
+        : "border-slate-200/85 bg-[linear-gradient(180deg,rgba(255,255,255,0.97)_0%,rgba(250,252,255,0.93)_100%)] shadow-[0_24px_60px_-44px_rgba(15,23,42,0.26)] hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-[0_30px_70px_-44px_rgba(15,23,42,0.3)]",
+    );
 
   return (
     <div className="stripe-page min-h-screen bg-background">
-      {/* Header */}
-      <header className="stripe-nav sticky top-0 z-50">
-        <div className="stripe-shell mx-auto flex h-16 w-full max-w-5xl items-center gap-4 px-4 sm:px-6">
-          <Button variant="ghost" size="sm" onClick={() => setLocation("/")} data-testid="button-back">
-            <ArrowLeft className="w-4 h-4 mr-1.5" />
-            Indietro
-          </Button>
-          <div className="h-5 w-px bg-border" />
-          <div className="flex items-center gap-2">
-            {mode === "business" ? (
-              <Building2 className="w-4 h-4 text-primary" />
-            ) : (
-              <Users className="w-4 h-4 text-accent" />
-            )}
-            <span className="font-medium text-sm">
-              {mode === "business" ? "Analizza la mia azienda" : "Analisi competitiva"}
-            </span>
-          </div>
-        </div>
-      </header>
+      <AppTopBar
+        maxWidthClassName="max-w-5xl"
+        left={(
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setLocation("/")}
+              data-testid="button-back"
+              className="stripe-topbar-chip h-11 rounded-full px-4 text-sm font-medium text-slate-700 hover:bg-white hover:text-slate-950"
+            >
+              <ArrowLeft className="mr-1.5 h-4 w-4" />
+              Indietro
+            </Button>
+            <div className="stripe-topbar-divider hidden sm:block" />
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="stripe-topbar-logo h-10 w-10 rounded-[0.9rem]">
+                {mode === "business" ? (
+                  <Building2 className="h-4 w-4 text-primary" />
+                ) : (
+                  <Users className="h-4 w-4 text-accent" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                  Workspace
+                </div>
+                <div className="truncate text-sm font-semibold text-slate-950">
+                  {mode === "business" ? "Analizza la mia azienda" : "Analisi competitiva"}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      />
 
       <div className="stripe-shell mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
         <div className="mx-auto w-full max-w-4xl">
         {/* Step 1: Company Search */}
-        <div className="stripe-panel mb-8 p-6 sm:p-8 fade-in">
+        <div className="stripe-panel relative mb-8 overflow-visible p-6 sm:p-8 fade-in">
           <div className="stripe-kicker mb-5">{mode === "business" ? "Company search" : "Competitive map"}</div>
           <h2 className="text-[32px] font-semibold tracking-[-0.04em] text-slate-950 mb-2">
             Cerca la tua azienda
@@ -856,7 +880,7 @@ export default function AnalysisPage() {
             Scrivi nome e localita' nella stessa ricerca, ad esempio `GEL SPA Castelfidardo`.
           </p>
 
-          <div ref={searchRef} className="relative">
+          <div ref={searchRef} className="relative z-20">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -950,49 +974,70 @@ export default function AnalysisPage() {
         </div>
 
         {mode === "business" && selectedCompany && (
-          <Card className="mt-5 border-border/70 bg-card/70 p-5">
-            <div className="flex flex-col gap-4">
+          <Card className="relative mt-5 overflow-hidden border-white/85 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,250,255,0.94)_100%)] p-5 shadow-[0_36px_82px_-52px_rgba(15,23,42,0.34)]">
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent" />
+            <div className="relative flex flex-col gap-5">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">
                     <UploadCloud className="h-3.5 w-3.5" />
                     Scegli come partire
                   </div>
-                  <h3 className="text-base font-semibold text-foreground">Hai gia' i bilanci oppure vuoi che li recuperiamo noi?</h3>
-                  <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                  <h3 className="text-[1.75rem] font-semibold tracking-[-0.04em] text-slate-950">
+                    Hai gia' i bilanci oppure vuoi che li recuperiamo noi?
+                  </h3>
+                  <p className="mt-2 max-w-3xl text-[1.02rem] leading-8 text-slate-500">
                     Se li hai gia', caricali e usiamo quelli. Se non li hai, BilancioAI recupera i documenti ufficiali per te.
                   </p>
                 </div>
-                <Badge variant="outline" className="self-start">PDF / XBRL</Badge>
+                <Badge variant="outline" className="self-start border-white/85 bg-white/88 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-700 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.24)]">
+                  PDF / XBRL
+                </Badge>
               </div>
 
               <div className="grid items-stretch gap-4 xl:grid-cols-2">
                 <button
                   type="button"
                   onClick={() => setDocumentPreference("upload")}
-                  className={`flex h-full min-h-[240px] flex-col rounded-2xl border p-6 text-left transition-all ${
-                    documentPreference === "upload"
-                      ? "border-primary bg-primary/5 shadow-sm"
-                      : "border-border/70 bg-background hover:border-primary/30"
-                  }`}
+                  className={getDocumentPreferenceCardClassName("upload")}
                   data-testid="card-document-preference-upload"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                      <UploadCloud className="h-4 w-4 text-primary" />
-                      Ho gia' i bilanci
+                  <div className={cn(
+                    "pointer-events-none absolute right-0 top-0 h-36 w-36 rounded-full blur-3xl transition-opacity",
+                    documentPreference === "upload" ? "bg-emerald-400/16 opacity-100" : "bg-primary/8 opacity-70",
+                  )} />
+                  <div className="relative flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border",
+                        documentPreference === "upload"
+                          ? "border-primary/18 bg-primary/10 text-primary"
+                          : "border-slate-200/80 bg-white/90 text-slate-500",
+                      )}>
+                        <UploadCloud className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                          Upload privato
+                        </div>
+                        <div className="mt-2 text-base font-semibold text-slate-950">Ho gia' i bilanci</div>
+                      </div>
                     </div>
-                    <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                    <span className="rounded-full border border-emerald-200/80 bg-emerald-50/90 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-700 shadow-sm">
                       Risparmi
                     </span>
                   </div>
-                  <div className="mt-6 flex flex-1 flex-col">
-                    <div className="text-[1.15rem] font-semibold leading-tight tracking-tight text-foreground sm:text-[1.35rem]">Caricali tu</div>
-                    <p className="mt-3 max-w-[38ch] text-sm leading-7 text-muted-foreground">
+                  <div className="relative mt-8 flex flex-1 flex-col">
+                    <div className="text-[1.9rem] font-semibold leading-tight tracking-[-0.04em] text-slate-950">
+                      Caricali tu
+                    </div>
+                    <p className="mt-4 max-w-[34ch] text-[1.02rem] leading-8 text-slate-600">
                       Usiamo i tuoi PDF o XBRL, restano privati e non compriamo documenti extra se bastano per l'analisi.
                     </p>
-                    <div className="mt-auto pt-8 text-sm font-medium text-muted-foreground">
+                    <div className="mt-auto pt-10">
+                      <span className="inline-flex rounded-full border border-slate-200/85 bg-white/86 px-3 py-1.5 text-sm font-medium text-slate-500 shadow-[0_14px_28px_-26px_rgba(15,23,42,0.32)]">
                       Ideale se hai gia' i file pronti
+                      </span>
                     </div>
                   </div>
                 </button>
@@ -1000,36 +1045,52 @@ export default function AnalysisPage() {
                 <button
                   type="button"
                   onClick={() => setDocumentPreference("openapi")}
-                  className={`flex h-full min-h-[240px] flex-col rounded-2xl border p-6 text-left transition-all ${
-                    documentPreference === "openapi"
-                      ? "border-primary bg-primary/5 shadow-sm"
-                      : "border-border/70 bg-background hover:border-primary/30"
-                  }`}
+                  className={getDocumentPreferenceCardClassName("openapi")}
                   data-testid="card-document-preference-openapi"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                      <FileText className="h-4 w-4 text-primary" />
-                      Non li ho
+                  <div className={cn(
+                    "pointer-events-none absolute right-0 top-0 h-36 w-36 rounded-full blur-3xl transition-opacity",
+                    documentPreference === "openapi" ? "bg-sky-400/16 opacity-100" : "bg-primary/8 opacity-70",
+                  )} />
+                  <div className="relative flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border",
+                        documentPreference === "openapi"
+                          ? "border-primary/18 bg-primary/10 text-primary"
+                          : "border-slate-200/80 bg-white/90 text-slate-500",
+                      )}>
+                        <FileText className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                          Documenti ufficiali
+                        </div>
+                        <div className="mt-2 text-base font-semibold text-slate-950">Non li ho</div>
+                      </div>
                     </div>
-                    <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-700">
+                    <span className="rounded-full border border-sky-200/80 bg-sky-50/90 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-700 shadow-sm">
                       Ci pensa BilancioAI
                     </span>
                   </div>
-                  <div className="mt-6 flex flex-1 flex-col">
-                    <div className="text-[1.15rem] font-semibold leading-tight tracking-tight text-foreground sm:text-[1.35rem]">Li recuperiamo noi</div>
-                    <p className="mt-3 max-w-[38ch] text-sm leading-7 text-muted-foreground">
+                  <div className="relative mt-8 flex flex-1 flex-col">
+                    <div className="text-[1.9rem] font-semibold leading-tight tracking-[-0.04em] text-slate-950">
+                      Li recuperiamo noi
+                    </div>
+                    <p className="mt-4 max-w-[34ch] text-[1.02rem] leading-8 text-slate-600">
                       Cerchiamo i documenti ufficiali disponibili e costruiamo il report a partire da quelli, anche se non hai nessun file a portata di mano.
                     </p>
-                    <div className="mt-auto pt-8 text-sm font-medium text-muted-foreground">
+                    <div className="mt-auto pt-10">
+                      <span className="inline-flex rounded-full border border-slate-200/85 bg-white/86 px-3 py-1.5 text-sm font-medium text-slate-500 shadow-[0_14px_28px_-26px_rgba(15,23,42,0.32)]">
                       Ideale se vuoi partire subito
+                      </span>
                     </div>
                   </div>
                 </button>
               </div>
 
               {documentPreference === "upload" ? (
-                <div className="space-y-4 rounded-xl border border-border/60 bg-muted/20 p-4">
+                <div className="space-y-4 rounded-[28px] border border-emerald-500/16 bg-[linear-gradient(180deg,rgba(255,255,255,0.95)_0%,rgba(240,253,248,0.96)_100%)] p-5 shadow-[0_24px_60px_-48px_rgba(16,185,129,0.34)]">
                   <div className="grid gap-3 md:grid-cols-[120px_minmax(0,1fr)_140px]">
                     <Input
                       type="number"
@@ -1063,12 +1124,12 @@ export default function AnalysisPage() {
                     </Button>
                   </div>
 
-                  <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-800">
+                  <div className="rounded-[22px] border border-emerald-500/14 bg-white/70 px-4 py-3 text-sm leading-7 text-emerald-900">
                     Se scegli questa modalità, l’analisi partirà solo dopo che hai caricato almeno un documento.
                   </div>
                 </div>
               ) : (
-                <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
+                <div className="rounded-[28px] border border-sky-200/55 bg-[linear-gradient(180deg,rgba(255,255,255,0.94)_0%,rgba(240,249,255,0.92)_100%)] px-5 py-4 text-sm leading-7 text-slate-600 shadow-[0_24px_60px_-52px_rgba(14,165,233,0.22)]">
                   Non hai documenti a portata di mano? Nessun problema: BilancioAI recupera i bilanci ufficiali necessari e costruisce il report completo.
                 </div>
               )}
@@ -1193,7 +1254,7 @@ export default function AnalysisPage() {
                 (mode === "competitor" && competitorMode === "provide" && selectedCompetitors.length === 0) ||
                 (mode === "business" && !canStartBusinessAnalysis)
               }
-              className="w-full h-12 text-base font-medium"
+              className="w-full min-h-16 rounded-[30px] text-[1.05rem] font-semibold tracking-[-0.02em] shadow-[0_30px_80px_-34px_rgba(99,91,255,0.68)]"
               data-testid="button-start-analysis"
             >
               {isAnalyzing ? (
