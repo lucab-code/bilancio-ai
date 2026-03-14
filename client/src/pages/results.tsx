@@ -19,6 +19,8 @@ interface ResultData {
   company: any;
   companyDetails: any;
   financialData: any;
+  insights?: any;
+  documentSource?: string | null;
   analysis: any;
   competitors: any;
   mode: string;
@@ -44,6 +46,21 @@ interface PurchasedBilancio {
     originalName?: string;
     mimeType?: string;
     storageKey?: string;
+  }>;
+  bilancioData: any;
+}
+
+interface UploadedBilancioDocument {
+  id: number;
+  year: string;
+  fetchedAt?: string;
+  documents: Array<{
+    id?: number;
+    filename?: string;
+    originalName?: string;
+    mimeType?: string;
+    storageKey?: string;
+    privateDocumentId?: number;
   }>;
   bilancioData: any;
 }
@@ -133,10 +150,16 @@ interface ChartData {
 interface CashFlowTableRow {
   key: string;
   label: string;
-  type: "currency" | "percent";
+  type: "currency" | "percent" | "days" | "multiple";
   values: Array<number | null>;
   emphasize?: boolean;
   secondary?: boolean;
+}
+
+interface SummaryStatItem {
+  label: string;
+  value: string;
+  hint?: string;
 }
 
 function formatMarginLabel(marginPct?: number | null): string {
@@ -153,14 +176,6 @@ function calculateMarginPercent(value: unknown, revenue: unknown): number | null
   return (value / revenue) * 100;
 }
 
-function formatNullableCurrency(value: unknown): string {
-  return isFiniteNumeric(value) ? formatCurrency(value) : "N/D";
-}
-
-function formatNullablePercent(value: unknown): string {
-  return isFiniteNumeric(value) ? `${value.toFixed(1)}%` : "N/D";
-}
-
 function formatFinancialTableMillions(value: unknown): string {
   if (!isFiniteNumeric(value)) return "NA";
   const normalized = value / 1_000_000;
@@ -172,6 +187,64 @@ function formatFinancialTablePercent(value: unknown): string {
   if (!isFiniteNumeric(value)) return "NA";
   const formatted = `${Math.abs(value).toFixed(1)}%`;
   return value < 0 ? `(${formatted})` : formatted;
+}
+
+function formatFinancialTableDays(value: unknown): string {
+  if (!isFiniteNumeric(value)) return "NA";
+  const formatted = `${Math.round(Math.abs(value))}`;
+  return value < 0 ? `(${formatted})` : formatted;
+}
+
+function formatFinancialTableMultiple(value: unknown): string {
+  if (!isFiniteNumeric(value)) return "NA";
+  const formatted = `${Math.abs(value).toFixed(1)}x`;
+  return value < 0 ? `(${formatted})` : formatted;
+}
+
+function formatMetricValue(value: unknown, kind: "currency" | "percent" | "multiple" | "days"): string {
+  if (!isFiniteNumeric(value)) return "N/D";
+  if (kind === "currency") return formatCurrency(value);
+  if (kind === "multiple") return `${value.toFixed(2)}x`;
+  if (kind === "days") return `${Math.round(value)} gg`;
+  return `${value.toFixed(1)}%`;
+}
+
+function averageNumeric(values: Array<number | null | undefined>): number | null {
+  const valid = values.filter((value): value is number => isFiniteNumeric(value));
+  if (valid.length === 0) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function formatSummaryStatValue(value: number | null, kind: "percent" | "days" | "multiple"): string {
+  if (!isFiniteNumeric(value)) return "N/D";
+  if (kind === "days") return `${Math.round(value)} gg`;
+  if (kind === "multiple") return `${value.toFixed(1)}x`;
+  return `${value.toFixed(1)}%`;
+}
+
+function getBenchmarkStatusTone(status: string | undefined) {
+  if (status === "above") {
+    return {
+      badge: "Sopra",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    };
+  }
+  if (status === "below") {
+    return {
+      badge: "Sotto",
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+    };
+  }
+  if (status === "in_line") {
+    return {
+      badge: "In linea",
+      className: "border-sky-200 bg-sky-50 text-sky-700",
+    };
+  }
+  return {
+    badge: "Parziale",
+    className: "border-slate-200 bg-slate-50 text-slate-600",
+  };
 }
 
 function mergeBilanciMaps(
@@ -190,6 +263,121 @@ function mergeBilanciMaps(
     };
     return acc;
   }, {} as Record<string, any>);
+}
+
+function FinancialTableCard({
+  title,
+  note,
+  years,
+  rows,
+  testId,
+  summaryItems,
+  showTable = true,
+}: {
+  title: string;
+  note: string;
+  years: string[];
+  rows: CashFlowTableRow[];
+  testId: string;
+  summaryItems?: SummaryStatItem[];
+  showTable?: boolean;
+}) {
+  const hasSummary = Array.isArray(summaryItems) && summaryItems.length > 0;
+  const hasTable = showTable && years.length > 0 && rows.length > 0;
+  if (!hasSummary && !hasTable) return null;
+
+  return (
+    <Card data-testid={testId}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {Array.isArray(summaryItems) && summaryItems.length > 0 && (
+          <div className="mb-6 grid gap-3 md:grid-cols-4">
+            {summaryItems.map((item) => (
+              <div
+                key={`${testId}-${item.label}`}
+                className="rounded-2xl border border-border/60 bg-slate-50/70 px-4 py-4"
+              >
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  {item.label}
+                </div>
+                <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+                  {item.value}
+                </div>
+                {item.hint && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {item.hint}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {hasTable && (
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-y-1 text-sm">
+              <thead>
+                <tr>
+                  <th className="px-4 pb-4 text-left align-bottom">
+                    <div className="text-sm font-semibold text-foreground">FYE (31-Dec)</div>
+                    <div className="pt-0.5 text-xs italic text-muted-foreground">{note}</div>
+                  </th>
+                  {years.map((year) => (
+                    <th
+                      key={`${testId}-head-${year}`}
+                      className="px-4 pb-4 text-right align-bottom text-sm font-semibold text-foreground"
+                    >
+                      {year}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.key}>
+                    <th
+                      className={`px-4 py-0.5 text-left ${
+                        row.secondary
+                          ? "pl-8 font-normal italic text-muted-foreground"
+                          : row.emphasize
+                            ? "font-semibold text-foreground"
+                            : "font-medium text-foreground"
+                      }`}
+                    >
+                      {row.label}
+                    </th>
+                    {row.values.map((value, index) => (
+                      <td
+                        key={`${row.key}-${years[index]}`}
+                        className={`px-4 py-0.5 text-right tabular-nums ${
+                          row.secondary
+                            ? "italic text-muted-foreground"
+                            : row.emphasize
+                              ? "font-semibold text-foreground"
+                              : "text-foreground/90"
+                        }`}
+                      >
+                        {row.type === "percent"
+                          ? formatFinancialTablePercent(value)
+                          : row.type === "days"
+                            ? formatFinancialTableDays(value)
+                            : row.type === "multiple"
+                              ? formatFinancialTableMultiple(value)
+                              : formatFinancialTableMillions(value)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 // Revenue vs EBITDA Chart with proper tooltip
@@ -541,6 +729,11 @@ export default function ResultsPage() {
   const mergedBilanci = mergeBilanciMaps(bilanciFromDetails, bilanciFromFinancial);
   const bilanci = isComparativeBusinessSource ? bilanciFromFinancial : mergedBilanci;
   const purchasedBilanci = (financialData?.purchasedBilanci || {}) as Record<string, PurchasedBilancio>;
+  const uploadedBilanci = (financialData?.userUploadedBilanci || {}) as Record<string, UploadedBilancioDocument>;
+  const insights = data.insights || financialData?.insights || {};
+  const marketBenchmarks = Array.isArray(insights?.marketBenchmarks?.metrics) ? insights.marketBenchmarks.metrics : [];
+  const marketBenchmarkSources = Array.isArray(insights?.marketBenchmarks?.sources) ? insights.marketBenchmarks.sources : [];
+  const recommendations = Array.isArray(insights?.recommendations) ? insights.recommendations : [];
   const companyIdForFiles = companyDetails?.id || company?.id || "";
   const yearsWithData = isComparativeBusinessSource
     ? (Array.isArray(financialData?.coveredYears)
@@ -553,10 +746,16 @@ export default function ResultsPage() {
   const hasDirectEbitda = yearsWithData.some(
     (y: string) => typeof bilanci[y]?.ebitda === "number" && Number.isFinite(bilanci[y].ebitda),
   );
-  const bilanciYears = Object.keys(purchasedBilanci)
+  const bilanciYears = Array.from(
+    new Set([
+      ...Object.keys(purchasedBilanci || {}),
+      ...Object.keys(uploadedBilanci || {}),
+    ]),
+  )
     .filter((year) => {
-      const documents = Array.isArray(purchasedBilanci[year]?.documents) ? purchasedBilanci[year].documents : [];
-      return documents.length > 0 || Boolean(purchasedBilanci[year]?.bilancioData);
+      const purchasedDocs = Array.isArray(purchasedBilanci[year]?.documents) ? purchasedBilanci[year].documents : [];
+      const uploadedDocs = Array.isArray(uploadedBilanci[year]?.documents) ? uploadedBilanci[year].documents : [];
+      return purchasedDocs.length > 0 || uploadedDocs.length > 0 || Boolean(purchasedBilanci[year]?.bilancioData) || Boolean(uploadedBilanci[year]?.bilancioData);
     })
     .sort((a, b) => b.localeCompare(a));
   const hasBilanciSection = bilanciYears.length > 0;
@@ -653,13 +852,6 @@ export default function ResultsPage() {
   const aiDescriptionSources = Array.isArray(companyDetails?.aiDescriptionSources)
     ? companyDetails.aiDescriptionSources.filter((source: any) => typeof source?.url === "string" && source.url.trim())
     : [];
-  const aiKeyProducts = Array.isArray(companyDetails?.aiKeyProducts)
-    ? companyDetails.aiKeyProducts
-        .filter((item: any) => typeof item?.name === "string" && item.name.trim())
-        .slice(0, 4)
-    : [];
-  const keyProductsWithImages = aiKeyProducts.filter((item: any) => typeof item?.imageUrl === "string" && item.imageUrl.trim());
-
   let fallbackDescriptionText = "";
   if (company.denominazione) {
     fallbackDescriptionText = `${company.denominazione}`;
@@ -668,9 +860,7 @@ export default function ResultsPage() {
     if (provincia && provincia !== comune) fallbackDescriptionText += ` (${provincia})`;
     fallbackDescriptionText += ".";
     if (descrizione) {
-      fallbackDescriptionText += ` Opera nel settore: ${descrizione.toLowerCase()}`;
-      if (codiceAteco) fallbackDescriptionText += ` (ATECO ${codiceAteco})`;
-      fallbackDescriptionText += ".";
+      fallbackDescriptionText += ` Opera nel settore ${descrizione.toLowerCase()}.`;
     }
     if (hasFinancials) {
       const lastYear = [...yearsWithData].reverse().find((year: string) => typeof bilanci[year]?.fatturato === "number") || yearsWithData[yearsWithData.length - 1];
@@ -777,6 +967,90 @@ export default function ResultsPage() {
       ]
     : [];
   const showCashFlowTable = data.mode === "business" && Boolean(activeChartData?.years.length);
+  const workingCapitalTableRows = activeChartData?.years.length
+    ? [
+        {
+          key: "nwc",
+          label: "Capitale circolante",
+          type: "currency" as const,
+          values: activeChartData.years.map((year) => (isFiniteNumeric(bilanci[year]?.nwc) ? bilanci[year].nwc : null)),
+          emphasize: true,
+        },
+        {
+          key: "dso",
+          label: "DSO",
+          type: "days" as const,
+          values: activeChartData.years.map((year) => (isFiniteNumeric(bilanci[year]?.dso) ? bilanci[year].dso : null)),
+        },
+        {
+          key: "dio",
+          label: "DIO",
+          type: "days" as const,
+          values: activeChartData.years.map((year) => (isFiniteNumeric(bilanci[year]?.dio) ? bilanci[year].dio : null)),
+        },
+        {
+          key: "dpo",
+          label: "DPO",
+          type: "days" as const,
+          values: activeChartData.years.map((year) => (isFiniteNumeric(bilanci[year]?.dpo) ? bilanci[year].dpo : null)),
+        },
+      ]
+    : [];
+  const debtTableRows = activeChartData?.years.length
+    ? [
+        {
+          key: "net-debt",
+          label: "Debito netto",
+          type: "currency" as const,
+          values: activeChartData.years.map((year) => (isFiniteNumeric(bilanci[year]?.net_debt) ? bilanci[year].net_debt : null)),
+          emphasize: true,
+        },
+        {
+          key: "net-debt-ebitda",
+          label: "Debito netto / EBITDA",
+          type: "multiple" as const,
+          values: activeChartData.years.map((year) => (isFiniteNumeric(bilanci[year]?.net_debt_ebitda) ? bilanci[year].net_debt_ebitda : null)),
+        },
+      ]
+    : [];
+  const hasWorkingCapitalTable = workingCapitalTableRows.some((row) => row.values.some((value) => isFiniteNumeric(value)));
+  const hasDebtTable = debtTableRows.some((row) => row.values.some((value) => isFiniteNumeric(value)));
+  const workingCapitalSummaryItems: SummaryStatItem[] = activeChartData?.years.length
+    ? [
+        {
+          label: "Cap. circolante / ricavi",
+          value: formatSummaryStatValue(
+            averageNumeric(activeChartData.years.map((year) => bilanci[year]?.nwc_pct_revenue ?? null)),
+            "percent",
+          ),
+          hint: "Media anni disponibili",
+        },
+        {
+          label: "Tempo incasso",
+          value: formatSummaryStatValue(
+            averageNumeric(activeChartData.years.map((year) => bilanci[year]?.dso ?? null)),
+            "days",
+          ),
+          hint: "DSO medio",
+        },
+        {
+          label: "Tempo magazzino",
+          value: formatSummaryStatValue(
+            averageNumeric(activeChartData.years.map((year) => bilanci[year]?.dio ?? null)),
+            "days",
+          ),
+          hint: "DIO medio",
+        },
+        {
+          label: "Tempo pagamento",
+          value: formatSummaryStatValue(
+            averageNumeric(activeChartData.years.map((year) => bilanci[year]?.dpo ?? null)),
+            "days",
+          ),
+          hint: "DPO medio",
+        },
+      ]
+    : [];
 
   return (
     <div className="min-h-screen bg-background">
@@ -910,51 +1184,6 @@ export default function ResultsPage() {
           </Card>
         )}
 
-        {keyProductsWithImages.length > 0 && (
-          <Card data-testid="section-key-products">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Key Products
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="flex flex-wrap gap-3">
-                {keyProductsWithImages.map((product: any, index: number) => (
-                  <div
-                    key={`${product.name}-${index}`}
-                    className="w-full max-w-[220px] overflow-hidden rounded-2xl border border-border/60 bg-card"
-                  >
-                    <div className="h-28 bg-slate-100">
-                      <img
-                        src={product.imageUrl}
-                        alt={product.name}
-                        className="h-full w-full object-cover"
-                        loading="lazy"
-                      />
-                    </div>
-                    <div className="space-y-1 p-2">
-                      <div className="text-sm font-semibold text-foreground">{product.name}</div>
-                      {typeof product?.tagline === "string" && product.tagline.trim() && (
-                        <p className="text-xs text-muted-foreground">{product.tagline}</p>
-                      )}
-                      {typeof product?.pageUrl === "string" && product.pageUrl.trim() && (
-                        <a
-                          href={product.pageUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center rounded-full border border-border/60 px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                        >
-                          Vedi prodotto
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
         {/* CHART */}
         {isLoadingEbitda && (
           <Card>
@@ -1032,6 +1261,160 @@ export default function ResultsPage() {
           </Card>
         )}
 
+        {data.mode === "business" && marketBenchmarks.length > 0 && (
+          <Card data-testid="section-performance-vs-market">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Performance vs Market
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="overflow-x-auto">
+                <div className="min-w-[680px] overflow-hidden rounded-2xl border border-border/60">
+                  <div className="grid grid-cols-[minmax(0,1.2fr)_120px_150px_110px] border-b border-border/60 bg-slate-50/80 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    <div>Metrica</div>
+                    <div className="text-right">Azienda</div>
+                    <div className="text-right">Mercato</div>
+                    <div className="text-right">Stato</div>
+                  </div>
+                  {marketBenchmarks.map((item: any, index: number) => {
+                    const tone = getBenchmarkStatusTone(item?.status);
+                    return (
+                      <div
+                        key={`${item.metric}-${index}`}
+                        className="grid grid-cols-[minmax(0,1.2fr)_120px_150px_110px] items-start gap-3 border-b border-border/50 px-4 py-4 last:border-b-0"
+                      >
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">{item.metric}</div>
+                          {typeof item?.comment === "string" && item.comment.trim() && (
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.comment}</p>
+                          )}
+                        </div>
+                        <div className="text-right text-sm font-semibold text-foreground">
+                          {formatMetricValue(item?.companyValue, "percent")}
+                        </div>
+                        <div className="text-right text-sm text-foreground/85">
+                          {isFiniteNumeric(item?.marketRangeLow) && isFiniteNumeric(item?.marketRangeHigh)
+                            ? `${item.marketRangeLow.toFixed(1)}% - ${item.marketRangeHigh.toFixed(1)}%`
+                            : "N/D"}
+                        </div>
+                        <div className="flex justify-end">
+                          <span className={`rounded-full border px-3 py-1 text-[11px] font-medium ${tone.className}`}>
+                            {tone.badge}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {marketBenchmarkSources.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {marketBenchmarkSources.map((source: any, index: number) => (
+                    <a
+                      key={`${source.url}-${index}`}
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center rounded-full border border-border/60 px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
+                    >
+                      {source.title || `Fonte ${index + 1}`}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {data.mode === "business" && hasWorkingCapitalTable && (
+          <FinancialTableCard
+            title="Capitale Circolante"
+            note="(Dati in €m e giorni)"
+            years={activeChartData?.years || []}
+            rows={workingCapitalTableRows}
+            testId="section-working-capital"
+            summaryItems={workingCapitalSummaryItems}
+            showTable={false}
+          />
+        )}
+
+        {data.mode === "business" && hasDebtTable && (
+          <FinancialTableCard
+            title="Debito"
+            note="(Dati in €m e x)"
+            years={activeChartData?.years || []}
+            rows={debtTableRows}
+            testId="section-debt"
+          />
+        )}
+
+        {data.mode === "business" && recommendations.length > 0 && (
+          <Card data-testid="section-recommendations">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Recommendations
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {recommendations.map((item: any, index: number) => {
+                const priority = typeof item?.priority === "string" ? item.priority : "medium";
+                const tone = priority === "high"
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                  : priority === "low"
+                    ? "border-slate-200 bg-slate-50 text-slate-600"
+                    : "border-sky-200 bg-sky-50 text-sky-700";
+
+                return (
+                  <div
+                    key={`${item?.title || "recommendation"}-${index}`}
+                    className="rounded-2xl border border-border/60 bg-card p-4"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-foreground">
+                          {item?.title || `Recommendation ${index + 1}`}
+                        </div>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {item?.description}
+                        </p>
+                        {(typeof item?.rationale === "string" && item.rationale.trim()) || (typeof item?.evidence === "string" && item.evidence.trim()) ? (
+                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                            {typeof item?.rationale === "string" && item.rationale.trim() && (
+                              <div className="rounded-xl border border-border/50 bg-slate-50/70 px-3 py-2">
+                                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                  Perche' conta
+                                </div>
+                                <p className="mt-1 text-xs leading-5 text-foreground/80">
+                                  {item.rationale}
+                                </p>
+                              </div>
+                            )}
+                            {typeof item?.evidence === "string" && item.evidence.trim() && (
+                              <div className="rounded-xl border border-border/50 bg-slate-50/70 px-3 py-2">
+                                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                  Evidenza
+                                </div>
+                                <p className="mt-1 text-xs leading-5 text-foreground/80">
+                                  {item.evidence}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                      <span className={`rounded-full border px-3 py-1 text-[11px] font-medium ${tone}`}>
+                        {priority === "high" ? "High" : priority === "low" ? "Low" : "Medium"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
+
         {hasBilanciSection && (
           <div className="flex justify-center">
             <Button
@@ -1053,9 +1436,9 @@ export default function ResultsPage() {
                 Vedi Bilanci
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Qui trovi i documenti del bilancio ottico salvati in cache.
-                Se OpenAPI restituisce allegati strutturati li vedi qui; altrimenti il grafico deriva dai PDF.
-                Ogni acquisto puo' coprire due annualita': anno corrente del deposito e comparativo precedente.
+                Qui trovi i documenti usati da BilancioAI: quelli acquistati dal provider e, se presenti,
+                i bilanci caricati da te in modo privato. Ogni acquisto o upload puo' coprire due annualita':
+                anno corrente del deposito e comparativo precedente.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1063,15 +1446,27 @@ export default function ResultsPage() {
                 {bilanciYears.map((year) => {
                   const summary = bilanci[year];
                   const purchased = purchasedBilanci[year];
+                  const uploaded = uploadedBilanci[year];
                   const documentSource = typeof purchased?.bilancioData?.source === "string" ? purchased.bilancioData.source : "";
                   const structuredPreview =
+                    uploaded?.bilancioData?.structuredData ||
+                    (uploaded?.bilancioData?.periods ? uploaded.bilancioData : null) ||
                     purchased?.bilancioData?.structuredData ||
                     (purchased?.bilancioData?.periods ? purchased.bilancioData : null);
-                  const coveredYearsForPurchase = Array.isArray((purchased as any)?.bilancioData?.coveredYears)
-                    ? ((purchased as any).bilancioData.coveredYears as string[])
-                    : Object.keys(((purchased as any)?.bilancioData?.periods || {}) as Record<string, unknown>).sort();
-                  const documentEntries = (purchased?.documents || [])
-                    .map((document, index) => ({ document, index }));
+                  const coveredYearsForPurchase = Array.from(
+                    new Set([
+                      ...(Array.isArray((uploaded as any)?.bilancioData?.coveredYears)
+                        ? ((uploaded as any).bilancioData.coveredYears as string[])
+                        : Object.keys(((uploaded as any)?.bilancioData?.periods || {}) as Record<string, unknown>).sort()),
+                      ...(Array.isArray((purchased as any)?.bilancioData?.coveredYears)
+                        ? ((purchased as any).bilancioData.coveredYears as string[])
+                        : Object.keys(((purchased as any)?.bilancioData?.periods || {}) as Record<string, unknown>).sort()),
+                    ]),
+                  );
+                  const documentEntries = [
+                    ...(uploaded?.documents || []).map((document, index) => ({ document, index, source: "user_upload" as const })),
+                    ...(purchased?.documents || []).map((document, index) => ({ document, index, source: "openapi" as const })),
+                  ];
                   const pdfDocuments = documentEntries.filter(({ document }) => isPdfDocument(document));
                   const structuredDocuments = documentEntries.filter(({ document }) => isStructuredBilancioDocument(document));
                   const hasStructuredPreview = Boolean(structuredPreview && typeof structuredPreview === "object");
@@ -1082,6 +1477,11 @@ export default function ResultsPage() {
                         <div className="flex min-w-0 flex-1 items-center gap-3">
                           <span className="font-semibold">{year}</span>
                           <div className="flex flex-wrap gap-2">
+                            {uploaded?.documents?.length > 0 && (
+                              <Badge variant="outline" className="text-[10px]">
+                                Privato
+                              </Badge>
+                            )}
                             {pdfDocuments.length > 0 && (
                               <Badge className="text-[10px]">{pdfDocuments.length} PDF</Badge>
                             )}
@@ -1102,7 +1502,7 @@ export default function ResultsPage() {
                       <AccordionContent className="space-y-4">
                         <div className="space-y-3 rounded-lg border border-border/50 bg-slate-50 p-4 dark:bg-slate-950/40">
                           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span>Salvato il {formatDateTime(purchased?.fetchedAt)}</span>
+                            <span>Salvato il {formatDateTime(uploaded?.fetchedAt || purchased?.fetchedAt)}</span>
                             {pdfDocuments.length > 0 && (
                               <>
                                 <span>•</span>
@@ -1125,22 +1525,25 @@ export default function ResultsPage() {
 
                           {documentEntries.length > 0 && (
                             <div className="flex flex-wrap gap-2">
-                              {documentEntries.map(({ document, index }) => {
+                              {documentEntries.map(({ document, index, source }) => {
                                 const params = new URLSearchParams();
                                 if (documentSource) params.set("source", documentSource);
                                 if (token) params.set("access_token", token);
                                 const queryString = params.toString();
+                                const href = source === "user_upload" && typeof document?.privateDocumentId === "number"
+                                  ? `${API_BASE}/api/private-bilanci/${document.privateDocumentId}/file${token ? `?access_token=${encodeURIComponent(token)}` : ""}`
+                                  : `${API_BASE}/api/bilancio/cached/${encodeURIComponent(companyIdForFiles)}/${encodeURIComponent(year)}/${index}${queryString ? `?${queryString}` : ""}`;
 
                                 return (
                                 <Button
-                                  key={`${year}-${index}`}
+                                  key={`${year}-${source}-${index}`}
                                   asChild
                                   size="sm"
                                   variant={isStructuredBilancioDocument(document) ? "default" : "outline"}
                                   className="gap-2"
                                 >
                                   <a
-                                    href={`${API_BASE}/api/bilancio/cached/${encodeURIComponent(companyIdForFiles)}/${encodeURIComponent(year)}/${index}${queryString ? `?${queryString}` : ""}`}
+                                    href={href}
                                     target="_blank"
                                     rel="noreferrer"
                                   >

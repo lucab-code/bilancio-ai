@@ -49,7 +49,7 @@ export async function loadConfig(): Promise<void> {
     [CONFIG_KEYS.STRIPE_WEBHOOK_SECRET]:
       fromDb[CONFIG_KEYS.STRIPE_WEBHOOK_SECRET] ?? process.env.STRIPE_WEBHOOK_SECRET ?? "",
     [CONFIG_KEYS.BILLING_BUSINESS_ANALYSIS_CENTS]:
-      fromDb[CONFIG_KEYS.BILLING_BUSINESS_ANALYSIS_CENTS] ?? process.env.BILLING_BUSINESS_ANALYSIS_CENTS ?? "1500",
+      fromDb[CONFIG_KEYS.BILLING_BUSINESS_ANALYSIS_CENTS] ?? process.env.BILLING_BUSINESS_ANALYSIS_CENTS ?? "2900",
     [CONFIG_KEYS.BILLING_SUBSCRIBER_EXTRA_ANALYSIS_CENTS]:
       fromDb[CONFIG_KEYS.BILLING_SUBSCRIBER_EXTRA_ANALYSIS_CENTS] ?? process.env.BILLING_SUBSCRIBER_EXTRA_ANALYSIS_CENTS ?? "1200",
     [CONFIG_KEYS.STRIPE_PRO_PRICE_ID]:
@@ -95,9 +95,9 @@ export function getStripeWebhookSecret(): string {
 }
 
 export function getBusinessAnalysisPriceCents(): number {
-  const raw = cache[CONFIG_KEYS.BILLING_BUSINESS_ANALYSIS_CENTS] ?? process.env.BILLING_BUSINESS_ANALYSIS_CENTS ?? "1500";
+  const raw = cache[CONFIG_KEYS.BILLING_BUSINESS_ANALYSIS_CENTS] ?? process.env.BILLING_BUSINESS_ANALYSIS_CENTS ?? "2900";
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1500;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 2900;
 }
 
 export function getSubscriberExtraAnalysisPriceCents(): number {

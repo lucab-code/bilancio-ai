@@ -137,6 +137,23 @@ export const companyFullCache = pgTable(
   (t) => [primaryKey({ columns: [t.companyId, t.taxCode] })]
 );
 
+export const userUploadedBilanci = pgTable("user_uploaded_bilanci", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  companyId: text("company_id").notNull(),
+  taxCode: text("tax_code"),
+  year: text("year").notNull(),
+  mimeType: text("mime_type").notNull(),
+  storagePath: text("storage_path").notNull(),
+  bucket: text("bucket"),
+  storageBackend: text("storage_backend").notNull().default("supabase"),
+  originalName: text("original_name"),
+  sizeBytes: integer("size_bytes"),
+  extractedData: jsonb("extracted_data"),
+  source: text("source").notNull().default("user_upload"),
+  createdAt: text("created_at").notNull(),
+});
+
 export const insertAnalysisSchema = createInsertSchema(analyses).omit({
   id: true,
 });
@@ -149,6 +166,7 @@ export type InsertAnalysis = z.infer<typeof insertAnalysisSchema>;
 export type Analysis = typeof analyses.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+export type UserUploadedBilancio = typeof userUploadedBilanci.$inferSelect;
 
 // Types for OpenAPI.it responses
 export interface CompanySearchResult {

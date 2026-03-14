@@ -67,6 +67,8 @@ function buildResultDataFromAnalysis(analysis: SavedAnalysis) {
     company,
     companyDetails,
     financialData: analysis.financialData || {},
+    insights: analysis.financialData?.insights || analysis.aiAnalysis?.insights || null,
+    documentSource: analysis.financialData?.documentSource || null,
     analysis: analysis.aiAnalysis || null,
     competitors: analysis.competitors || null,
     mode: analysis.mode,
@@ -215,26 +217,38 @@ export default function HomePage() {
   const deleteSavedAnalysis = async (analysis: SavedAnalysis) => {
     if (!token || deletingAnalysisId === analysis.id) return;
 
+    const companyKey =
+      analysis.companyId ||
+      analysis.taxCode ||
+      analysis.companyName;
+    const relatedAnalyses = savedAnalyses.filter((item) => {
+      const itemKey = item.companyId || item.taxCode || item.companyName;
+      return itemKey === companyKey;
+    });
+    const idsToDelete = relatedAnalyses.map((item) => item.id);
+
     const confirmed = window.confirm(
-      `Vuoi eliminare l'analisi di "${analysis.companyDetails?.denominazione || analysis.companyName}"?`,
+      `Vuoi eliminare ${idsToDelete.length > 1 ? "tutte le analisi" : "l'analisi"} di "${analysis.companyDetails?.denominazione || analysis.companyName}"?`,
     );
     if (!confirmed) return;
 
     setDeletingAnalysisId(analysis.id);
     try {
-      const res = await fetch(`${API_BASE}/api/analyses/${analysis.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      for (const id of idsToDelete) {
+        const res = await fetch(`${API_BASE}/api/analyses/${id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        console.error("Could not delete analysis", payload);
-        window.alert("Impossibile eliminare l'analisi.");
-        return;
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          console.error("Could not delete analysis", payload);
+          window.alert("Impossibile eliminare l'analisi.");
+          return;
+        }
       }
 
-      setSavedAnalyses((current) => current.filter((item) => item.id !== analysis.id));
+      setSavedAnalyses((current) => current.filter((item) => !idsToDelete.includes(item.id)));
     } catch (error) {
       console.error("Could not delete analysis", error);
       window.alert("Impossibile eliminare l'analisi.");
@@ -292,11 +306,11 @@ export default function HomePage() {
           <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-4 leading-tight">
             Analizza i bilanci aziendali
             <br />
-            <span className="text-primary">come un analista bancario</span>
+            <span className="text-primary">con benchmark e raccomandazioni</span>
           </h1>
           <p className="text-muted-foreground text-base md:text-lg max-w-2xl mx-auto mb-12">
-            Scarica automaticamente i bilanci dalla Camera di Commercio, riclassificali 
-            secondo gli standard bancari e ottieni analisi AI con raccomandazioni strategiche.
+            BilancioAI unisce bilanci ufficiali, confronto con il mercato, lettura di circolante e debito
+            e ti lascia usare anche i bilanci che hai gia', se vuoi partire dai tuoi documenti.
           </p>
 
           <div className="grid gap-5 md:grid-cols-2 max-w-3xl mx-auto">
@@ -514,18 +528,18 @@ export default function HomePage() {
             {[
               {
                 icon: <BarChart3 className="w-5 h-5" />,
-                title: "Bilancio automatico",
-                desc: "Scarica il bilancio ufficiale dalla Camera di Commercio tramite API in meno di 1 minuto.",
+                title: "Bilanci ufficiali o tuoi upload",
+                desc: "Usa i documenti ufficiali oppure carica i tuoi PDF/XBRL e analizza l'azienda partendo direttamente dai tuoi file.",
               },
               {
                 icon: <TrendingUp className="w-5 h-5" />,
-                title: "Riclassificazione bancaria",
-                desc: "Analisi secondo gli standard bancari: Stato Patrimoniale, Conto Economico, Cash Flow.",
+                title: "Benchmark e market context",
+                desc: "Confronta margini, crescita e cash conversion con range di mercato costruiti via ricerca web e AI.",
               },
               {
                 icon: <Shield className="w-5 h-5" />,
-                title: "Analisi AI e raccomandazioni",
-                desc: "GPT-4 analizza, confronta con il mercato e fornisce raccomandazioni strategiche.",
+                title: "Working capital e raccomandazioni",
+                desc: "Leggi in pochi minuti circolante, debito e priorità operative invece di fermarti ai numeri grezzi.",
               },
             ].map((f, i) => (
               <div key={i} className="text-center fade-in" style={{ animationDelay: `${i * 100}ms` }}>

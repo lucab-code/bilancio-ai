@@ -104,6 +104,8 @@ const EXCLUDED_PATH_HINTS = [
   "legislazioni",
 ];
 
+const WEB_FETCH_TIMEOUT_MS = 8000;
+
 function normalizeCompanyText(value: string): string {
   return value
     .normalize("NFD")
@@ -340,8 +342,11 @@ function extractProductLinks(html: string, homepageUrl: string): Array<{ url: st
 }
 
 async function fetchHtmlDocument(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), WEB_FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
+      signal: controller.signal,
       headers: {
         "user-agent": "Mozilla/5.0 (compatible; BilancioAI/1.0; +https://bilancio.ai)",
         accept: "text/html,application/xhtml+xml",
@@ -358,12 +363,17 @@ async function fetchHtmlDocument(url: string): Promise<string | null> {
     return text.trim() ? text : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
 async function fetchJsonDocument<T>(url: string): Promise<T | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), WEB_FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
+      signal: controller.signal,
       headers: {
         "user-agent": "Mozilla/5.0 (compatible; BilancioAI/1.0; +https://bilancio.ai)",
         accept: "application/json,text/plain,*/*",
@@ -373,6 +383,8 @@ async function fetchJsonDocument<T>(url: string): Promise<T | null> {
     return await res.json() as T;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

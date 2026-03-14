@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
-import { Search, Building2, Users, MapPin, ArrowLeft, Loader2, Plus, X, Sparkles } from "lucide-react";
+import { Search, Building2, Users, MapPin, ArrowLeft, Loader2, Plus, X, Sparkles, UploadCloud, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -38,6 +38,26 @@ type WalletState = {
   balanceCents: number;
   currency: string;
   businessAnalysisCents: number;
+  billingEnabled?: boolean;
+  tier?: "free" | "pro" | "business";
+  subscription?: {
+    tier: "pro" | "business";
+    status: string;
+    analysesUsed: number;
+    analysesLimit: number;
+    currentPeriodEnd?: string | null;
+  } | null;
+};
+
+type UploadedBilancioItem = {
+  id: number;
+  companyId: string;
+  taxCode?: string | null;
+  year: string;
+  mimeType: string;
+  originalName?: string | null;
+  source: string;
+  createdAt: string;
 };
 
 const ANALYSIS_WAIT_MESSAGES = [
@@ -46,6 +66,8 @@ const ANALYSIS_WAIT_MESSAGES = [
   "L'AI sta trasformando numeri sparsi in un memo leggibile da investitore.",
   "Prepariamo grafico, descrizione e key takeaways in un unico passaggio.",
 ] as const;
+
+const PENDING_ANALYSIS_STORAGE_KEY = "bilancioai.pendingAnalysis";
 
 function formatRemainingMinutes(seconds: number | null): string {
   if (seconds === null) return "Stiamo ancora elaborando oltre il tempo stimato";
@@ -255,6 +277,12 @@ export default function AnalysisPage() {
   const [analysisStep, setAnalysisStep] = useState("");
   const [walletState, setWalletState] = useState<WalletState | null>(null);
   const [isLoadingWallet, setIsLoadingWallet] = useState(false);
+  const [uploadedBilanci, setUploadedBilanci] = useState<UploadedBilancioItem[]>([]);
+  const [isUploadingBilancio, setIsUploadingBilancio] = useState(false);
+  const [uploadYear, setUploadYear] = useState(String(new Date().getFullYear()));
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadInputKey, setUploadInputKey] = useState(0);
+  const [documentPreference, setDocumentPreference] = useState<"upload" | "openapi">("openapi");
   const [waitMessageIndex, setWaitMessageIndex] = useState(0);
   const [stepElapsedSeconds, setStepElapsedSeconds] = useState(0);
   const stepStartedAtRef = useRef<number | null>(null);
@@ -310,6 +338,90 @@ export default function AnalysisPage() {
     return fetch(url, { ...opts, headers });
   };
 
+  const persistPendingAnalysisContext = useCallback(() => {
+    if (typeof window === "undefined" || !selectedCompany) return;
+
+    window.sessionStorage.setItem(
+      PENDING_ANALYSIS_STORAGE_KEY,
+      JSON.stringify({
+        mode,
+        selectedCompany,
+        documentPreference,
+        query,
+      }),
+    );
+  }, [documentPreference, mode, query, selectedCompany]);
+
+  const loadUploadedBilanci = useCallback(async (companyId: string) => {
+    if (!token || mode !== "business" || !companyId) {
+      setUploadedBilanci([]);
+      return;
+    }
+
+    try {
+      const res = await authFetch(`${API_BASE}/api/private-bilanci?companyId=${encodeURIComponent(companyId)}`);
+      const payload = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(payload?.data)) {
+        setUploadedBilanci(payload.data);
+      } else {
+        setUploadedBilanci([]);
+      }
+    } catch (error) {
+      console.error("Private bilanci load failed", error);
+      setUploadedBilanci([]);
+    }
+  }, [mode, token]);
+
+  const handlePrivateBilancioUpload = useCallback(async () => {
+    if (!selectedCompany || !uploadFile) return;
+    const normalizedYear = uploadYear.trim();
+    if (!/^\d{4}$/.test(normalizedYear)) {
+      toast({
+        title: "Anno non valido",
+        description: "Inserisci un anno di bilancio a 4 cifre.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploadingBilancio(true);
+    try {
+      const formData = new FormData();
+      formData.append("companyId", selectedCompany.id);
+      if (selectedCompany.cf || selectedCompany.piva) {
+        formData.append("taxCode", selectedCompany.cf || selectedCompany.piva || "");
+      }
+      formData.append("year", normalizedYear);
+      formData.append("file", uploadFile);
+
+      const res = await authFetch(`${API_BASE}/api/private-bilanci/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "Impossibile caricare il bilancio");
+      }
+
+      setUploadFile(null);
+      setUploadInputKey((current) => current + 1);
+      await loadUploadedBilanci(selectedCompany.id);
+      toast({
+        title: "Bilancio caricato",
+        description: "Il documento è stato salvato nel tuo spazio privato e avrà priorità nell'analisi.",
+      });
+    } catch (error: any) {
+      console.error("Private bilancio upload failed", error);
+      toast({
+        title: "Upload fallito",
+        description: error?.message || "Impossibile caricare il bilancio.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingBilancio(false);
+    }
+  }, [authFetch, loadUploadedBilanci, selectedCompany, toast, uploadFile, uploadYear]);
+
   const loadWalletState = useCallback(async () => {
     if (!token || mode !== "business") return;
 
@@ -328,6 +440,7 @@ export default function AnalysisPage() {
   }, [token, mode]);
 
   const redirectToCheckout = useCallback(async (topUpCents?: number) => {
+    persistPendingAnalysisContext();
     const res = await authFetch(`${API_BASE}/api/billing/checkout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -339,11 +452,46 @@ export default function AnalysisPage() {
     }
 
     window.location.href = payload.data.url;
-  }, [token]);
+  }, [persistPendingAnalysisContext, token]);
 
   useEffect(() => {
     loadWalletState();
   }, [loadWalletState]);
+
+  useEffect(() => {
+    if (mode !== "business") return;
+    if (!selectedCompany) {
+      setUploadedBilanci([]);
+      return;
+    }
+    loadUploadedBilanci(selectedCompany.id);
+  }, [loadUploadedBilanci, mode, selectedCompany]);
+
+  useEffect(() => {
+    if (mode !== "business") return;
+    if (uploadedBilanci.length > 0) {
+      setDocumentPreference("upload");
+    } else {
+      setDocumentPreference("openapi");
+    }
+  }, [mode, uploadedBilanci.length, selectedCompany?.id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || selectedCompany) return;
+
+    const raw = window.sessionStorage.getItem(PENDING_ANALYSIS_STORAGE_KEY);
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.mode !== mode || !parsed?.selectedCompany?.id) return;
+      setSelectedCompany(parsed.selectedCompany);
+      setQuery(typeof parsed?.query === "string" ? parsed.query : parsed.selectedCompany.denominazione || "");
+      setDocumentPreference(parsed?.documentPreference === "upload" ? "upload" : "openapi");
+    } catch {
+      // Ignore invalid session state
+    }
+  }, [mode, selectedCompany]);
 
   useEffect(() => {
     if (mode !== "business") return;
@@ -356,6 +504,10 @@ export default function AnalysisPage() {
       loadWalletState();
     } else if (billingState === "cancelled") {
       toast({ title: "Pagamento annullato", description: "Nessun credito e' stato addebitato.", variant: "destructive" });
+    }
+
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(PENDING_ANALYSIS_STORAGE_KEY);
     }
 
     const hash = window.location.hash.replace(/^#/, "");
@@ -412,14 +564,27 @@ export default function AnalysisPage() {
         const walletPayload = await walletRes.json().catch(() => ({}));
         const balanceCents = walletPayload?.data?.balanceCents ?? walletState?.balanceCents ?? 0;
         const analysisCostCents = walletPayload?.data?.businessAnalysisCents ?? walletState?.businessAnalysisCents ?? 0;
-
         if (!walletRes.ok) {
           throw new Error(walletPayload?.error || "Errore nel recupero del credito");
         }
 
         setWalletState(walletPayload.data);
 
-        if (analysisCostCents > 0 && balanceCents < analysisCostCents) {
+        if (documentPreference === "upload" && uploadedBilanci.length === 0) {
+          setIsAnalyzing(false);
+          toast({
+            title: "Carica almeno un bilancio",
+            description: "Hai scelto di usare i tuoi documenti: carica almeno un PDF o un file XBRL prima di partire.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const billingEnabled = Boolean(walletPayload?.data?.billingEnabled);
+        const subscriptionStatus = walletPayload?.data?.subscription?.status ?? walletState?.subscription?.status ?? null;
+        const hasSubscriptionAccess = subscriptionStatus === "active" || subscriptionStatus === "trialing";
+
+        if (billingEnabled && !hasSubscriptionAccess && analysisCostCents > 0 && balanceCents < analysisCostCents) {
           const missingCents = analysisCostCents - balanceCents;
           setIsAnalyzing(false);
           toast({
@@ -455,6 +620,7 @@ export default function AnalysisPage() {
             companyId: selectedCompany.id,
             vatCode: selectedCompany.piva,
             taxCode: selectedCompany.cf,
+            documentPreference,
           }),
         });
 
@@ -476,7 +642,11 @@ export default function AnalysisPage() {
           throw new Error(fullData?.error || "Errore nel recupero dati da bilancio ottico");
         }
 
-        if (walletState) {
+        const hasSubscriptionAccess =
+          walletState?.subscription?.status === "active" ||
+          walletState?.subscription?.status === "trialing";
+
+        if (walletState && !hasSubscriptionAccess) {
           setWalletState({
             ...walletState,
             balanceCents: Math.max(0, walletState.balanceCents - (walletState.businessAnalysisCents || 0)),
@@ -487,6 +657,8 @@ export default function AnalysisPage() {
           company: selectedCompany,
           companyDetails: fullData.data.companyDetails,
           financialData: fullData.data.financialData,
+          insights: fullData.data.insights || fullData.data.financialData?.insights || null,
+          documentSource: fullData.data.documentSource || fullData.data.financialData?.documentSource || null,
           analysis: null,
           competitors: null,
           mode,
@@ -646,12 +818,14 @@ export default function AnalysisPage() {
 
   const analysisProgressState = getAnalysisProgressState(analysisStep, mode, stepElapsedSeconds);
   const analysisProgress = analysisProgressState.progress;
+  const canStartBusinessAnalysis =
+    mode !== "business" || documentPreference !== "upload" || uploadedBilanci.length > 0;
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b border-border/50 bg-card/60 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-4xl mx-auto px-6 h-16 flex items-center gap-4">
+        <div className="mx-auto flex h-16 w-full max-w-5xl items-center gap-4 px-4 sm:px-6">
           <Button variant="ghost" size="sm" onClick={() => setLocation("/")} data-testid="button-back">
             <ArrowLeft className="w-4 h-4 mr-1.5" />
             Indietro
@@ -670,7 +844,8 @@ export default function AnalysisPage() {
         </div>
       </header>
 
-      <div className="max-w-2xl mx-auto px-6 py-10">
+      <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+        <div className="mx-auto w-full max-w-4xl">
         {/* Step 1: Company Search */}
         <div className="mb-8 fade-in">
           <h2 className="text-xl font-semibold mb-2">
@@ -772,6 +947,134 @@ export default function AnalysisPage() {
             </Card>
           )}
         </div>
+
+        {mode === "business" && selectedCompany && (
+          <Card className="mt-5 border-border/70 bg-card/70 p-5">
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">
+                    <UploadCloud className="h-3.5 w-3.5" />
+                    Scegli come partire
+                  </div>
+                  <h3 className="text-base font-semibold text-foreground">Hai gia' i bilanci oppure vuoi che li recuperiamo noi?</h3>
+                  <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                    Se li hai gia', caricali e usiamo quelli. Se non li hai, BilancioAI recupera i documenti ufficiali per te.
+                  </p>
+                </div>
+                <Badge variant="outline" className="self-start">PDF / XBRL</Badge>
+              </div>
+
+              <div className="grid items-stretch gap-4 xl:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setDocumentPreference("upload")}
+                  className={`flex h-full min-h-[240px] flex-col rounded-2xl border p-6 text-left transition-all ${
+                    documentPreference === "upload"
+                      ? "border-primary bg-primary/5 shadow-sm"
+                      : "border-border/70 bg-background hover:border-primary/30"
+                  }`}
+                  data-testid="card-document-preference-upload"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <UploadCloud className="h-4 w-4 text-primary" />
+                      Ho gia' i bilanci
+                    </div>
+                    <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                      Risparmi
+                    </span>
+                  </div>
+                  <div className="mt-6 flex flex-1 flex-col">
+                    <div className="text-[1.15rem] font-semibold leading-tight tracking-tight text-foreground sm:text-[1.35rem]">Caricali tu</div>
+                    <p className="mt-3 max-w-[38ch] text-sm leading-7 text-muted-foreground">
+                      Usiamo i tuoi PDF o XBRL, restano privati e non compriamo documenti extra se bastano per l'analisi.
+                    </p>
+                    <div className="mt-auto pt-8 text-sm font-medium text-muted-foreground">
+                      Ideale se hai gia' i file pronti
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDocumentPreference("openapi")}
+                  className={`flex h-full min-h-[240px] flex-col rounded-2xl border p-6 text-left transition-all ${
+                    documentPreference === "openapi"
+                      ? "border-primary bg-primary/5 shadow-sm"
+                      : "border-border/70 bg-background hover:border-primary/30"
+                  }`}
+                  data-testid="card-document-preference-openapi"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <FileText className="h-4 w-4 text-primary" />
+                      Non li ho
+                    </div>
+                    <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-700">
+                      Ci pensa BilancioAI
+                    </span>
+                  </div>
+                  <div className="mt-6 flex flex-1 flex-col">
+                    <div className="text-[1.15rem] font-semibold leading-tight tracking-tight text-foreground sm:text-[1.35rem]">Li recuperiamo noi</div>
+                    <p className="mt-3 max-w-[38ch] text-sm leading-7 text-muted-foreground">
+                      Cerchiamo i documenti ufficiali disponibili e costruiamo il report a partire da quelli, anche se non hai nessun file a portata di mano.
+                    </p>
+                    <div className="mt-auto pt-8 text-sm font-medium text-muted-foreground">
+                      Ideale se vuoi partire subito
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {documentPreference === "upload" ? (
+                <div className="space-y-4 rounded-xl border border-border/60 bg-muted/20 p-4">
+                  <div className="grid gap-3 md:grid-cols-[120px_minmax(0,1fr)_140px]">
+                    <Input
+                      type="number"
+                      min="2000"
+                      max="2099"
+                      value={uploadYear}
+                      onChange={(event) => setUploadYear(event.target.value)}
+                      placeholder="Anno"
+                      data-testid="input-upload-year"
+                    />
+                    <Input
+                      key={uploadInputKey}
+                      type="file"
+                      accept=".pdf,.xbrl,.xml,.json,.zip"
+                      onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+                      data-testid="input-private-bilancio-file"
+                    />
+                    <Button
+                      type="button"
+                      onClick={handlePrivateBilancioUpload}
+                      disabled={!uploadFile || isUploadingBilancio}
+                      className="gap-2"
+                      data-testid="button-upload-private-bilancio"
+                    >
+                      {isUploadingBilancio ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <UploadCloud className="h-4 w-4" />
+                      )}
+                      Carica
+                    </Button>
+                  </div>
+
+                  <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-800">
+                    Se scegli questa modalità, l’analisi partirà solo dopo che hai caricato almeno un documento.
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
+                  Non hai documenti a portata di mano? Nessun problema: BilancioAI recupera i bilanci ufficiali necessari e costruisce il report completo.
+                </div>
+              )}
+
+            </div>
+          </Card>
+        )}
 
         {/* Step 2: Competitor options (only in competitor mode) */}
         {mode === "competitor" && selectedCompany && (
@@ -884,7 +1187,11 @@ export default function AnalysisPage() {
           <div className="fade-in">
             <Button
               onClick={startAnalysis}
-              disabled={isAnalyzing || (mode === "competitor" && competitorMode === "provide" && selectedCompetitors.length === 0)}
+              disabled={
+                isAnalyzing ||
+                (mode === "competitor" && competitorMode === "provide" && selectedCompetitors.length === 0) ||
+                (mode === "business" && !canStartBusinessAnalysis)
+              }
               className="w-full h-12 text-base font-medium"
               data-testid="button-start-analysis"
             >
@@ -896,7 +1203,7 @@ export default function AnalysisPage() {
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 mr-2" />
-                  Avvia analisi
+                  {mode === "business" && !canStartBusinessAnalysis ? "Carica almeno un bilancio per continuare" : "Avvia analisi"}
                 </>
               )}
             </Button>
@@ -965,6 +1272,7 @@ export default function AnalysisPage() {
             )}
           </div>
         )}
+        </div>
       </div>
 
       <footer className="border-t border-border/50 py-6 px-6 mt-auto text-center">

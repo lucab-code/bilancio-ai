@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { ArrowLeft, Check, Crown, Zap, Building2, CreditCard, Loader2 } from "lucide-react";
+import { ArrowLeft, Check, Crown, CreditCard, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,46 +10,23 @@ const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
 const PLANS = [
   {
-    id: "free",
-    name: "Free",
-    price: "0",
-    period: "",
-    description: "Scopri BilancioAI",
-    features: [
-      "Ricerca aziende illimitata",
-      "Dati base azienda (fatturato, settore, dipendenti)",
-    ],
-    excluded: [
-      "Analisi finanziaria completa",
-      "Grafici EBITDA e ricavi",
-      "SWOT Analysis",
-      "Raccomandazioni strategiche",
-      "Analisi competitor",
-      "Export PDF",
-    ],
-    cta: null,
-    highlight: false,
-    icon: Building2,
-  },
-  {
     id: "single",
     name: "Analisi Singola",
-    price: "15",
+    price: "29",
     period: "per analisi",
-    description: "Paga solo quando ti serve",
+    description: "Per usare BilancioAI quando ti serve",
     features: [
-      "Analisi finanziaria completa",
-      "Download bilanci CCIAA (4 anni)",
+      "Report completo azienda",
+      "Summary Financials",
       "Grafici EBITDA e ricavi",
-      "Conto economico e stato patrimoniale",
-      "Analisi Cash Flow",
-      "Indicatori chiave con trend",
+      "Benchmark di mercato",
+      "Working Capital & Debt",
+      "Recommendations operative",
+      "Upload privato dei tuoi bilanci",
     ],
     excluded: [
-      "Raccomandazioni strategiche",
-      "Analisi competitor",
-      "Confronto di mercato",
-      "Export PDF",
+      "Crediti mensili inclusi",
+      "Uso ricorrente da dashboard",
     ],
     cta: "Ricarica credito",
     ctaAction: "checkout",
@@ -58,45 +35,25 @@ const PLANS = [
   },
   {
     id: "pro",
-    name: "Pro",
+    name: "BilancioAI Plus",
     price: "79",
     period: "/mese",
-    yearlyPrice: "699/anno",
-    description: "Per professionisti e consulenti",
+    description: "Per imprenditori, advisor e uso ricorrente",
     features: [
       "5 analisi incluse al mese",
-      "Tutto dell'Analisi Singola",
-      "Raccomandazioni strategiche",
-      "Analisi competitor (3-5 aziende)",
-      "Confronto di mercato",
-      "Profilo web aziendale",
-      "Export PDF del report",
-      "Analisi extra a \u20ac12 ciascuna",
+      "Summary Financials e grafici completi",
+      "Benchmark di mercato",
+      "Working Capital & Debt",
+      "Recommendations operative",
+      "Upload privato dei tuoi bilanci",
+      "Storico analisi e watchlist",
+      "Analisi extra via wallet",
     ],
     excluded: [],
-    cta: "Abbonati a Pro",
+    cta: "Attiva BilancioAI Plus",
     ctaAction: "subscribe_pro",
     highlight: true,
     icon: Crown,
-  },
-  {
-    id: "business",
-    name: "Business",
-    price: "199",
-    period: "/mese",
-    yearlyPrice: "1.799/anno",
-    description: "Per studi e team",
-    features: [
-      "15 analisi incluse al mese",
-      "Tutto del Pro",
-      "Analisi extra a \u20ac10 ciascuna",
-      "Supporto prioritario",
-    ],
-    excluded: [],
-    cta: "Abbonati a Business",
-    ctaAction: "subscribe_business",
-    highlight: false,
-    icon: Zap,
   },
 ];
 
@@ -119,14 +76,14 @@ export default function PricingPage() {
         const res = await fetch(`${API_BASE}/api/billing/checkout`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ topUpCents: 1500 }),
+          body: JSON.stringify({ topUpCents: 2900 }),
         });
         const data = await res.json();
         if (data?.data?.url) {
           window.location.href = data.data.url;
         }
-      } else if (action === "subscribe_pro" || action === "subscribe_business") {
-        const plan = action === "subscribe_pro" ? "pro" : "business";
+      } else if (action === "subscribe_pro") {
+        const plan = "pro";
         const res = await fetch(`${API_BASE}/api/billing/subscribe`, {
           method: "POST",
           headers,
@@ -159,11 +116,11 @@ export default function PricingPage() {
         <div className="text-center mb-12">
           <h1 className="text-3xl font-bold tracking-tight">Scegli il piano giusto per te</h1>
           <p className="text-muted-foreground mt-3 max-w-lg mx-auto">
-            Analisi finanziarie complete con dati dalla Camera di Commercio e intelligenza artificiale.
+            BilancioAI combina bilanci ufficiali, benchmark di mercato e raccomandazioni operative in un report unico.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-5 md:grid-cols-2">
           {PLANS.map((plan) => {
             const Icon = plan.icon;
             return (
@@ -185,11 +142,6 @@ export default function PricingPage() {
                     <span className="text-3xl font-bold">{"\u20ac"}{plan.price}</span>
                     {plan.period && <span className="text-sm text-muted-foreground">{plan.period}</span>}
                   </div>
-                  {"yearlyPrice" in plan && plan.yearlyPrice && (
-                    <p className="text-xs text-muted-foreground">
-                      oppure {"\u20ac"}{plan.yearlyPrice} (~2 mesi gratis)
-                    </p>
-                  )}
                   <p className="text-sm text-muted-foreground mt-1">{plan.description}</p>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col">
@@ -230,17 +182,16 @@ export default function PricingPage() {
             <div>
               <h3 className="font-medium text-sm">Cosa include l'analisi singola?</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                L'analisi completa include download dei bilanci ufficiali dalla Camera di Commercio (fino a 4 anni),
-                grafici comparativi EBITDA e ricavi, analisi del conto economico, stato patrimoniale, cash flow,
-                e indicatori chiave con trend.
+                Include il report completo azienda con grafici ricavi/EBITDA, summary financials,
+                benchmark di mercato, analisi di working capital e debito, raccomandazioni operative
+                e la possibilita' di usare i bilanci che hai gia' caricandoli direttamente in piattaforma.
               </p>
             </div>
             <div>
-              <h3 className="font-medium text-sm">Cosa sblocca l'abbonamento Pro?</h3>
+              <h3 className="font-medium text-sm">Cosa sblocca BilancioAI Plus?</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Con Pro hai 5 analisi al mese incluse, pi{"\u00f9"} le funzionalit{"\u00e0"} premium: raccomandazioni strategiche
-                personalizzate, analisi dei competitor, confronto di mercato, profilo web aziendale,
-                e export PDF del report completo.
+                Hai 5 analisi incluse al mese, dashboard con storico, benchmark di mercato, raccomandazioni,
+                caricamento dei tuoi bilanci e possibilita' di usare il wallet per analisi extra.
               </p>
             </div>
             <div>
@@ -253,8 +204,8 @@ export default function PricingPage() {
             <div>
               <h3 className="font-medium text-sm">Come funzionano le analisi extra?</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Se superi le analisi incluse nel tuo piano, puoi acquistarne altre a prezzo scontato
-                ({"\u20ac"}12 per Pro, {"\u20ac"}10 per Business) tramite il tuo credito wallet.
+                Se finisci le analisi incluse, puoi ricaricare credito wallet e lanciare nuovi report
+                senza cambiare piano.
               </p>
             </div>
           </div>

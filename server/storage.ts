@@ -1,6 +1,6 @@
-import type { Analysis, InsertAnalysis, User, InsertUser } from "@shared/schema";
-import { users, analyses, sessions, bilanciCache, companyDetailsCache, companyFullCache } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import type { Analysis, InsertAnalysis, User, InsertUser, UserUploadedBilancio } from "@shared/schema";
+import { users, analyses, sessions, bilanciCache, companyDetailsCache, companyFullCache, userUploadedBilanci } from "@shared/schema";
+import { and, eq } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
 import { getDb } from "./db";
@@ -42,6 +42,12 @@ export interface IStorage {
   getCachedCompanyFullData(companyId: string): Promise<any | undefined>;
   getCachedCompanyFullDataByTaxCode(taxCode: string): Promise<any | undefined>;
   setCachedCompanyFullData(companyId: string, taxCode: string, data: any): Promise<void>;
+
+  // Private uploaded bilanci (owner-only)
+  createUserUploadedBilancio(data: Omit<UserUploadedBilancio, "id">): Promise<UserUploadedBilancio>;
+  listUserUploadedBilanci(userId: number, companyId: string): Promise<UserUploadedBilancio[]>;
+  getUserUploadedBilancio(userId: number, id: number): Promise<UserUploadedBilancio | undefined>;
+  deleteUserUploadedBilancio(userId: number, id: number): Promise<UserUploadedBilancio | undefined>;
 }
 
 // Persistent JSON file storage
@@ -51,6 +57,7 @@ const ANALYSES_FILE = path.join(DATA_DIR, "analyses.json");
 const BILANCI_FILE = path.join(DATA_DIR, "bilanci.json");
 const COMPANY_DETAILS_FILE = path.join(DATA_DIR, "company_details.json");
 const COMPANY_FULL_FILE = path.join(DATA_DIR, "company_full.json");
+const USER_UPLOADED_BILANCI_FILE = path.join(DATA_DIR, "user_uploaded_bilanci.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 
 function ensureDataDir() {
@@ -93,6 +100,11 @@ interface StoredCompanyFull {
   entries: Record<string, { companyId: string; taxCode: string; data: any; ts: number }>;
 }
 
+interface StoredUserUploadedBilanci {
+  nextId: number;
+  documents: UserUploadedBilancio[];
+}
+
 export interface CachedPurchasedBilancio {
   year: string;
   fetchedAt: string;
@@ -133,6 +145,7 @@ export class FileStorage implements IStorage {
   private analysisData: StoredAnalyses;
   private bilanciData: StoredBilanci;
   private companyFullData: StoredCompanyFull;
+  private userUploadedBilanciData: StoredUserUploadedBilanci;
 
   constructor() {
     ensureDataDir();
@@ -140,6 +153,7 @@ export class FileStorage implements IStorage {
     this.analysisData = readJSON<StoredAnalyses>(ANALYSES_FILE, { analyses: [], nextAnalysisId: 1 });
     this.bilanciData = readJSON<StoredBilanci>(BILANCI_FILE, { entries: {} });
     this.companyFullData = readJSON<StoredCompanyFull>(COMPANY_FULL_FILE, { entries: {} });
+    this.userUploadedBilanciData = readJSON<StoredUserUploadedBilanci>(USER_UPLOADED_BILANCI_FILE, { nextId: 1, documents: [] });
   }
 
   private saveUsers() {
@@ -156,6 +170,10 @@ export class FileStorage implements IStorage {
 
   private saveCompanyFull() {
     writeJSON(COMPANY_FULL_FILE, this.companyFullData);
+  }
+
+  private saveUserUploadedBilanci() {
+    writeJSON(USER_UPLOADED_BILANCI_FILE, this.userUploadedBilanciData);
   }
 
   private getBilancioEntryByCompanyId(companyId: string) {
@@ -372,6 +390,34 @@ export class FileStorage implements IStorage {
 
   async setCachedCompanyFullData(companyId: string, taxCode: string, data: any): Promise<void> {
     this.upsertCompanyFullEntry(companyId, taxCode, data);
+  }
+
+  async createUserUploadedBilancio(data: Omit<UserUploadedBilancio, "id">): Promise<UserUploadedBilancio> {
+    const document: UserUploadedBilancio = {
+      ...data,
+      id: this.userUploadedBilanciData.nextId++,
+    };
+    this.userUploadedBilanciData.documents.push(document);
+    this.saveUserUploadedBilanci();
+    return document;
+  }
+
+  async listUserUploadedBilanci(userId: number, companyId: string): Promise<UserUploadedBilancio[]> {
+    return this.userUploadedBilanciData.documents
+      .filter((item) => item.userId === userId && item.companyId === companyId)
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  }
+
+  async getUserUploadedBilancio(userId: number, id: number): Promise<UserUploadedBilancio | undefined> {
+    return this.userUploadedBilanciData.documents.find((item) => item.userId === userId && item.id === id);
+  }
+
+  async deleteUserUploadedBilancio(userId: number, id: number): Promise<UserUploadedBilancio | undefined> {
+    const index = this.userUploadedBilanciData.documents.findIndex((item) => item.userId === userId && item.id === id);
+    if (index === -1) return undefined;
+    const [removed] = this.userUploadedBilanciData.documents.splice(index, 1);
+    this.saveUserUploadedBilanci();
+    return removed;
   }
 }
 
@@ -653,6 +699,40 @@ export class SupabaseStorage implements IStorage {
 
   async setCachedCompanyFullData(companyId: string, taxCode: string, data: unknown): Promise<void> {
     await this.upsertCompanyFullData(companyId, taxCode, data);
+  }
+
+  async createUserUploadedBilancio(data: Omit<UserUploadedBilancio, "id">): Promise<UserUploadedBilancio> {
+    const [row] = await getDb()
+      .insert(userUploadedBilanci)
+      .values(data)
+      .returning();
+    if (!row) throw new Error("createUserUploadedBilancio failed");
+    return row as UserUploadedBilancio;
+  }
+
+  async listUserUploadedBilanci(userId: number, companyId: string): Promise<UserUploadedBilancio[]> {
+    const rows = await getDb()
+      .select()
+      .from(userUploadedBilanci)
+      .where(and(eq(userUploadedBilanci.userId, userId), eq(userUploadedBilanci.companyId, companyId)));
+    return rows as UserUploadedBilancio[];
+  }
+
+  async getUserUploadedBilancio(userId: number, id: number): Promise<UserUploadedBilancio | undefined> {
+    const [row] = await getDb()
+      .select()
+      .from(userUploadedBilanci)
+      .where(and(eq(userUploadedBilanci.userId, userId), eq(userUploadedBilanci.id, id)))
+      .limit(1);
+    return row as UserUploadedBilancio | undefined;
+  }
+
+  async deleteUserUploadedBilancio(userId: number, id: number): Promise<UserUploadedBilancio | undefined> {
+    const [row] = await getDb()
+      .delete(userUploadedBilanci)
+      .where(and(eq(userUploadedBilanci.userId, userId), eq(userUploadedBilanci.id, id)))
+      .returning();
+    return row as UserUploadedBilancio | undefined;
   }
 }
 

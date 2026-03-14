@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import Stripe from "stripe";
 import { storage } from "./storage";
-import { isStoredInlineBilancioDocument, isStoredPdfDocument, persistBilancioDocument, readStoredBilancioDocument } from "./bilancio-files";
+import { deleteStoredBilancioDocument, isStoredInlineBilancioDocument, isStoredPdfDocument, persistBilancioDocument, persistPrivateBilancioDocument, readStoredBilancioDocument } from "./bilancio-files";
 import { buildOfficialWebsiteProfile, inferOfficialWebsiteUrl, pickOfficialWebsiteUrl } from "./company-web-profile";
 import { BILANCIO_OTTICO_XBRL_SOURCE, extractStructuredBilancioData } from "./xbrl-parser";
 import {
@@ -18,7 +18,7 @@ import {
   getStripeProPriceId,
   getStripeBusinessPriceId,
 } from "./config";
-import { createStructuredResponse, OpenAIResponsesError } from "./openai";
+import { createStructuredResponse, createTextResponse, OpenAIResponsesError } from "./openai";
 import { getOrCreateUserFromSupabaseToken, isSupabaseAuthConfigured } from "./supabase-auth";
 import {
   BILLING_CURRENCY,
@@ -35,7 +35,7 @@ import {
   resetSubscriptionAnalyses,
   cancelSubscription,
 } from "./billing";
-import type { Tier } from "@shared/schema";
+import type { Tier, UserUploadedBilancio } from "@shared/schema";
 
 function getCompanyBase(): string {
   return getCompanyBaseUrl();
@@ -89,6 +89,7 @@ const DOCUENGINE_DOCUMENT_IDS = {
 const BILANCIO_OTTICO_COMPARATIVE_SOURCE = "bilancio-ottico-comparative-4y-v1";
 const BILANCIO_OTTICO_PDF_SOURCE = "bilancio-ottico-pdf-v1";
 const COMPANY_DESCRIPTION_WEB_VERSION = "web-v4";
+const BUSINESS_INSIGHTS_VERSION = "insights-v3";
 let stripeClient: Stripe | null = null;
 
 function getLatestPurchasedBilancio(purchasedBilanci: Record<string, any> | undefined) {
@@ -262,6 +263,72 @@ function buildCompanySearchResultFromCachedDetails(
   return result;
 }
 
+function buildCompanySearchResultFromAnalysis(
+  query: string,
+  sourceRank: number,
+  analysis: any,
+) {
+  if (!analysis || typeof analysis !== "object") return null;
+
+  const fromCompanyDetails = buildCompanySearchResultFromCachedDetails(
+    query,
+    sourceRank,
+    analysis.companyDetails,
+  );
+  if (fromCompanyDetails) {
+    return fromCompanyDetails;
+  }
+
+  const result = {
+    id: typeof analysis.companyId === "string" ? analysis.companyId : "",
+    denominazione: typeof analysis.companyName === "string" ? analysis.companyName : "",
+    indirizzo: typeof analysis.address === "string" ? analysis.address : "",
+    comune: "",
+    provincia: "",
+    cap: "",
+    piva: "",
+    cf: typeof analysis.taxCode === "string" ? analysis.taxCode : "",
+    stato_attivita: "",
+    _score: 0,
+    _sourceRank: sourceRank,
+  };
+
+  if (!result.id || !result.denominazione) return null;
+  result._score = scoreCompanySearchResult(query, result, sourceRank);
+  return result;
+}
+
+type ScoredCompanySearchResult = NonNullable<ReturnType<typeof buildCompanySearchResultFromAnalysis>>;
+
+async function searchLocalCompanyResults(query: string) {
+  const analyses = await storage.listAnalyses();
+  const seen = new Set<string>();
+  const results: ScoredCompanySearchResult[] = [];
+
+  for (const analysis of [...analyses].reverse()) {
+    const dedupeKey =
+      (typeof analysis?.companyId === "string" && analysis.companyId.trim()) ||
+      (typeof analysis?.taxCode === "string" && analysis.taxCode.trim()) ||
+      normalizeCompanySearchText(String(analysis?.companyName || ""));
+
+    if (!dedupeKey || seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    const result = buildCompanySearchResultFromAnalysis(query, results.length, analysis);
+    if (!result) continue;
+    if (result._score < 120) continue;
+    results.push(result);
+  }
+
+  return results
+    .sort((a, b) => {
+      if ((b?._score || 0) !== (a?._score || 0)) return (b?._score || 0) - (a?._score || 0);
+      return (a?._sourceRank || 0) - (b?._sourceRank || 0);
+    })
+    .slice(0, 8)
+    .map(({ _score, _sourceRank, ...company }) => company);
+}
+
 function findNumericValue(values: unknown[]): { found: boolean; value: number } {
   for (const value of values) {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -384,6 +451,13 @@ const BILANCIO_OTTICO_PDF_SCHEMA = {
           changeNwc: { type: ["number", "null"] },
           capex: { type: ["number", "null"] },
           unleveredFreeCashFlow: { type: ["number", "null"] },
+          tradeReceivables: { type: ["number", "null"] },
+          inventory: { type: ["number", "null"] },
+          tradePayables: { type: ["number", "null"] },
+          cash: { type: ["number", "null"] },
+          shortTermFinancialDebt: { type: ["number", "null"] },
+          longTermFinancialDebt: { type: ["number", "null"] },
+          totalFinancialDebt: { type: ["number", "null"] },
           confidence: { type: "string", enum: ["high", "medium", "low"] },
         },
         required: [
@@ -400,12 +474,111 @@ const BILANCIO_OTTICO_PDF_SCHEMA = {
           "changeNwc",
           "capex",
           "unleveredFreeCashFlow",
+          "tradeReceivables",
+          "inventory",
+          "tradePayables",
+          "cash",
+          "shortTermFinancialDebt",
+          "longTermFinancialDebt",
+          "totalFinancialDebt",
           "confidence",
         ],
       },
     },
   },
   required: ["years"],
+} as const;
+
+const MARKET_BENCHMARK_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    metrics: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          metric: { type: "string" },
+          companyValue: { type: ["number", "null"] },
+          marketRangeLow: { type: ["number", "null"] },
+          marketRangeHigh: { type: ["number", "null"] },
+          status: { type: "string", enum: ["below", "in_line", "above", "insufficient_data"] },
+          comment: { type: "string" },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          sources: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                title: { type: "string" },
+                url: { type: "string" },
+              },
+              required: ["title", "url"],
+            },
+          },
+        },
+        required: [
+          "metric",
+          "companyValue",
+          "marketRangeLow",
+          "marketRangeHigh",
+          "status",
+          "comment",
+          "confidence",
+          "sources",
+        ],
+      },
+    },
+  },
+  required: ["metrics"],
+} as const;
+
+const WORKING_CAPITAL_RECOMMENDATIONS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    workingCapitalDebt: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        summary: { type: "string" },
+        bullets: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+      required: ["summary", "bullets"],
+    },
+    recommendations: {
+      type: "array",
+      minItems: 4,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          theme: {
+            type: "string",
+            enum: [
+              "margini_pricing",
+              "capitale_circolante",
+              "debito_struttura",
+              "allocazione_capitale",
+              "crescita_posizionamento",
+            ],
+          },
+          title: { type: "string" },
+          description: { type: "string" },
+          rationale: { type: "string" },
+          evidence: { type: "string" },
+          priority: { type: "string", enum: ["high", "medium", "low"] },
+        },
+        required: ["theme", "title", "description", "rationale", "evidence", "priority"],
+      },
+    },
+  },
+  required: ["workingCapitalDebt", "recommendations"],
 } as const;
 
 const COMPANY_DESCRIPTION_SCHEMA = {
@@ -729,8 +902,57 @@ function calculateUnleveredFreeCashFlow(data: {
   return ebitda - taxes - changeNwc - capex;
 }
 
-function createMissingComparativeYear(year: string) {
+function calculatePercentage(value: unknown, denominator: unknown): number | null {
+  if (!isFiniteNumber(value) || !isFiniteNumber(denominator) || denominator === 0) return null;
+  return Number(((value / denominator) * 100).toFixed(1));
+}
+
+function calculateRatio(value: unknown, denominator: unknown): number | null {
+  if (!isFiniteNumber(value) || !isFiniteNumber(denominator) || denominator === 0) return null;
+  return Number((value / denominator).toFixed(2));
+}
+
+function calculateDays(balance: unknown, flow: unknown): number | null {
+  if (!isFiniteNumber(balance) || !isFiniteNumber(flow) || flow === 0) return null;
+  return Number(((balance / flow) * 365).toFixed(0));
+}
+
+function enrichBilancioDerivedMetrics(row: Record<string, any>) {
+  const totalFinancialDebt = isFiniteNumber(row.debito_finanziario_totale)
+    ? row.debito_finanziario_totale
+    : (isFiniteNumber(row.debito_finanziario_breve) || isFiniteNumber(row.debito_finanziario_lungo))
+      ? (row.debito_finanziario_breve ?? 0) + (row.debito_finanziario_lungo ?? 0)
+      : null;
+
+  const nwc =
+    (isFiniteNumber(row.crediti_commerciali) ? row.crediti_commerciali : null) != null ||
+    (isFiniteNumber(row.rimanenze) ? row.rimanenze : null) != null ||
+    (isFiniteNumber(row.debiti_commerciali) ? row.debiti_commerciali : null) != null
+      ? (row.crediti_commerciali ?? 0) + (row.rimanenze ?? 0) - (row.debiti_commerciali ?? 0)
+      : null;
+
+  const netDebt =
+    isFiniteNumber(totalFinancialDebt) || isFiniteNumber(row.cassa)
+      ? (totalFinancialDebt ?? 0) - (row.cassa ?? 0)
+      : null;
+
   return {
+    ...row,
+    debito_finanziario_totale: totalFinancialDebt,
+    nwc,
+    nwc_pct_revenue: calculatePercentage(nwc, row.fatturato),
+    dso: calculateDays(row.crediti_commerciali, row.fatturato),
+    dio: calculateDays(row.rimanenze, row.fatturato),
+    dpo: calculateDays(row.debiti_commerciali, row.fatturato),
+    net_debt: netDebt,
+    net_debt_ebitda: calculateRatio(netDebt, row.ebitda),
+    debt_equity: calculateRatio(totalFinancialDebt, row.patrimonio_netto),
+    cash_conversion: calculatePercentage(row.unlevered_free_cash_flow, row.ebitda),
+  };
+}
+
+function createMissingComparativeYear(year: string) {
+  return enrichBilancioDerivedMetrics({
     data_chiusura_bilancio: null,
     fatturato: null,
     ebit: null,
@@ -741,6 +963,16 @@ function createMissingComparativeYear(year: string) {
     change_nwc: null,
     capex: null,
     unlevered_free_cash_flow: null,
+    crediti_commerciali: null,
+    rimanenze: null,
+    debiti_commerciali: null,
+    cassa: null,
+    debito_finanziario_breve: null,
+    debito_finanziario_lungo: null,
+    debito_finanziario_totale: null,
+    dso: null,
+    dio: null,
+    dpo: null,
     patrimonio_netto: null,
     capitale_sociale: null,
     costo_personale: null,
@@ -749,7 +981,7 @@ function createMissingComparativeYear(year: string) {
     sourcePurchaseYear: null,
     sourcePeriod: null,
     method: "Periodo non disponibile o campi XBRL incompleti nel bilancio ottico.",
-  };
+  });
 }
 
 function buildBilanciFromComparativeXbrl(
@@ -767,15 +999,16 @@ function buildBilanciFromComparativeXbrl(
 
     for (const [year, period] of Object.entries<any>(bilancioData.periods || {})) {
       if (!(year in output) || !period || typeof period !== "object") continue;
-      output[year] = {
-        ...output[year],
-        ...period,
-        method:
+    output[year] = {
+      ...output[year],
+      ...period,
+      method:
           period.status === "ok"
             ? "EBITDA ricavato dai dati strutturati del bilancio ottico: EBIT + ammortamenti."
             : "Periodo non disponibile o campi strutturati incompleti nel bilancio ottico.",
-      };
-    }
+    };
+    output[year] = enrichBilancioDerivedMetrics(output[year]);
+  }
   }
 
   return output;
@@ -815,6 +1048,13 @@ function buildBilanciFromPdfExtraction(coveredYears: string[], extractedYears: a
       change_nwc: extractedChangeNwc,
       capex: extractedCapex,
       unlevered_free_cash_flow: extractedUfcf,
+      crediti_commerciali: typeof item?.tradeReceivables === "number" ? item.tradeReceivables : null,
+      rimanenze: typeof item?.inventory === "number" ? item.inventory : null,
+      debiti_commerciali: typeof item?.tradePayables === "number" ? item.tradePayables : null,
+      cassa: typeof item?.cash === "number" ? item.cash : null,
+      debito_finanziario_breve: typeof item?.shortTermFinancialDebt === "number" ? item.shortTermFinancialDebt : null,
+      debito_finanziario_lungo: typeof item?.longTermFinancialDebt === "number" ? item.longTermFinancialDebt : null,
+      debito_finanziario_totale: typeof item?.totalFinancialDebt === "number" ? item.totalFinancialDebt : null,
       status:
         typeof item?.revenue === "number" && typeof item?.ebitda === "number"
           ? "ok"
@@ -823,6 +1063,7 @@ function buildBilanciFromPdfExtraction(coveredYears: string[], extractedYears: a
       sourcePeriod: item?.sourcePeriod === "current" || item?.sourcePeriod === "comparative" ? item.sourcePeriod : null,
       method: "Dati estratti dal PDF del bilancio ottico. EBITDA calcolato come EBIT + ammortamenti.",
     };
+    output[year] = enrichBilancioDerivedMetrics(output[year]);
   }
 
   return output;
@@ -843,9 +1084,16 @@ function shouldEnrichComparativeBilanciWithAi(
       row.ebitda,
       row.utile_netto,
       row.taxes,
-      row.change_nwc,
-      row.capex,
-      row.unlevered_free_cash_flow,
+        row.change_nwc,
+        row.capex,
+        row.unlevered_free_cash_flow,
+        row.crediti_commerciali,
+        row.rimanenze,
+        row.debiti_commerciali,
+        row.cassa,
+        row.debito_finanziario_breve,
+        row.debito_finanziario_lungo,
+        row.debito_finanziario_totale,
     ].some((value) => !isFiniteNumber(value));
   });
 }
@@ -865,10 +1113,26 @@ function mergeComparativeBilanci(
     "change_nwc",
     "capex",
     "unlevered_free_cash_flow",
+    "crediti_commerciali",
+    "rimanenze",
+    "debiti_commerciali",
+    "cassa",
+    "debito_finanziario_breve",
+    "debito_finanziario_lungo",
+    "debito_finanziario_totale",
+    "dso",
+    "dio",
+    "dpo",
     "patrimonio_netto",
     "capitale_sociale",
     "costo_personale",
     "totale_attivo",
+    "nwc",
+    "nwc_pct_revenue",
+    "net_debt",
+    "net_debt_ebitda",
+    "debt_equity",
+    "cash_conversion",
   ] as const;
 
   return coveredYears.reduce((acc, year) => {
@@ -909,7 +1173,7 @@ function mergeComparativeBilanci(
 
     const computedUfcf = calculateUnleveredFreeCashFlow(base);
     base.unlevered_free_cash_flow = computedUfcf;
-    acc[year] = base;
+    acc[year] = enrichBilancioDerivedMetrics(base);
     return acc;
   }, {} as Record<string, any>);
 }
@@ -936,6 +1200,13 @@ Per il PDF allegato:
 - estrai taxes come imposte sul reddito dell'esercizio, espresse come assorbimento di cassa positivo
 - estrai changeNwc come variazione del capitale circolante netto operativo con segno cash flow: positivo se assorbe cassa, negativo se rilascia cassa
 - estrai capex come investimenti / spese in conto capitale, espresso come assorbimento di cassa positivo
+- estrai tradeReceivables come crediti commerciali / crediti verso clienti
+- estrai inventory come rimanenze / magazzino
+- estrai tradePayables come debiti commerciali / debiti verso fornitori
+- estrai cash come disponibilita' liquide / cassa / depositi bancari e postali
+- estrai shortTermFinancialDebt come debito finanziario entro 12 mesi
+- estrai longTermFinancialDebt come debito finanziario oltre 12 mesi
+- estrai totalFinancialDebt come totale debito finanziario; se non esplicito ma breve+lungo sono leggibili, puoi sommarli
 - calcola unleveredFreeCashFlow = EBITDA - taxes - changeNwc - capex
 Restituisci una riga per ogni anno realmente leggibile.
 Se un valore non e' leggibile o derivabile con alta affidabilita', usa null.
@@ -977,7 +1248,7 @@ Non stimare, non interpolare, non usare conoscenze esterne.`;
       }],
       schemaName: `bilancio_ottico_extraction_${purchaseYear}`,
       schema: BILANCIO_OTTICO_PDF_SCHEMA,
-      maxOutputTokens: 2500,
+      maxOutputTokens: 3500,
       reasoningEffort: "medium",
     });
 
@@ -1681,6 +1952,635 @@ async function downloadAndStoreBilancioDocuments(companyId: string, year: string
   return { storedDocuments, bilancioData };
 }
 
+function buildUserUploadedBilanciPackage(uploadedDocuments: UserUploadedBilancio[]): Record<string, any> {
+  const sorted = [...uploadedDocuments].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+
+  return sorted.reduce((acc, document) => {
+    const year = extractYear(document.year) || document.year;
+    if (!year) return acc;
+
+    const current = acc[year] || {
+      year,
+      fetchedAt: document.createdAt,
+      documents: [],
+      bilancioData: {
+        source: "user_upload",
+        purchaseYear: year,
+        documentType: "user-upload",
+        structuredData: null,
+        coveredYears: [],
+        parsedFrom: null,
+      },
+    };
+
+    current.documents.push({
+      id: document.id,
+      filename: document.originalName || document.storagePath.split("/").pop() || `bilancio-${year}`,
+      originalName: document.originalName,
+      mimeType: document.mimeType,
+      storageKey: document.storagePath,
+      storageBackend: document.storageBackend,
+      bucket: document.bucket,
+      source: "user_upload",
+      privateDocumentId: document.id,
+    });
+
+    const extractedData = document.extractedData;
+    const extractedStructuredData =
+      extractedData && typeof extractedData === "object"
+        ? extractedData
+        : null;
+
+    if (!current.bilancioData.structuredData && extractedStructuredData) {
+      current.bilancioData = {
+        source: "user_upload",
+        purchaseYear: year,
+        documentType: "user-upload",
+        structuredData: extractedStructuredData,
+        coveredYears: Array.isArray((extractedStructuredData as any)?.coveredYears)
+          ? (extractedStructuredData as any).coveredYears
+          : [],
+        parsedFrom: typeof (extractedStructuredData as any)?.parsedFrom === "string"
+          ? (extractedStructuredData as any).parsedFrom
+          : document.originalName || null,
+      };
+    }
+
+    acc[year] = current;
+    return acc;
+  }, {} as Record<string, any>);
+}
+
+async function readMultipartFormData(req: Request): Promise<FormData> {
+  const webRequest = new Request("http://localhost/internal-upload", {
+    method: req.method,
+    headers: req.headers as any,
+    body: req as any,
+    duplex: "half" as any,
+  } as any);
+  return webRequest.formData();
+}
+
+function dedupeInsightSources(sources: Array<{ title?: string; url?: string }> | undefined) {
+  const deduped = new Map<string, { title: string; url: string }>();
+  for (const source of sources || []) {
+    const url = typeof source?.url === "string" ? source.url.trim() : "";
+    const title = typeof source?.title === "string" ? source.title.trim() : "";
+    if (!url) continue;
+    deduped.set(url, { title: title || url, url });
+  }
+  return Array.from(deduped.values());
+}
+
+function getLatestFinancialSnapshot(financialData: any) {
+  const bilanci = financialData?.bilanci && typeof financialData.bilanci === "object" ? financialData.bilanci : {};
+  const years = Object.keys(bilanci)
+    .filter((year) => bilanci?.[year]?.status !== "missing")
+    .sort((a, b) => b.localeCompare(a));
+  const latestYear = years[0] || null;
+  const latest = latestYear ? bilanci[latestYear] : null;
+
+  return {
+    latestYear,
+    latest,
+    years,
+    metrics: {
+      revenueGrowth: years.length >= 2
+        ? calculatePercentage(
+            (bilanci[years[0]]?.fatturato ?? 0) - (bilanci[years[1]]?.fatturato ?? 0),
+            bilanci[years[1]]?.fatturato,
+          )
+        : null,
+      ebitdaMargin: latest ? calculatePercentage(latest.ebitda, latest.fatturato) : null,
+      netMargin: latest ? calculatePercentage(latest.utile_netto, latest.fatturato) : null,
+      cashConversion: latest?.cash_conversion ?? null,
+      nwcPctRevenue: latest?.nwc_pct_revenue ?? null,
+      netDebtEbitda: latest?.net_debt_ebitda ?? null,
+      debtEquity: latest?.debt_equity ?? null,
+    },
+  };
+}
+
+function buildFallbackInsights(financialData: any) {
+  const snapshot = getLatestFinancialSnapshot(financialData);
+  const latest = snapshot.latest;
+  const latestYear = snapshot.latestYear || "ultimo anno disponibile";
+  const bullets: string[] = [];
+  const recommendations: Array<{
+    theme: "margini_pricing" | "capitale_circolante" | "debito_struttura" | "allocazione_capitale" | "crescita_posizionamento";
+    title: string;
+    description: string;
+    rationale: string;
+    evidence: string;
+    priority: "high" | "medium" | "low";
+  }> = [];
+
+  if (isFiniteNumber(latest?.nwc_pct_revenue)) {
+    bullets.push(
+      latest.nwc_pct_revenue > 20
+        ? "Il capitale circolante assorbe una quota elevata dei ricavi e comprime la generazione di cassa."
+        : "Il capitale circolante appare relativamente disciplinato rispetto ai ricavi.",
+    );
+  }
+  if (isFiniteNumber(latest?.dso) || isFiniteNumber(latest?.dpo) || isFiniteNumber(latest?.dio)) {
+    bullets.push(
+      `La dinamica dei giorni di incasso, magazzino e pagamento richiede disciplina operativa per evitare ulteriore assorbimento di cassa.`,
+    );
+  }
+  if (isFiniteNumber(latest?.net_debt_ebitda)) {
+    bullets.push(
+      latest.net_debt_ebitda > 3
+        ? "La leva finanziaria e' tesa rispetto alla capacita' di generare EBITDA e riduce margine di manovra."
+        : "La leva finanziaria appare gestibile rispetto all'EBITDA disponibile.",
+    );
+  }
+  if (isFiniteNumber(snapshot.metrics.cashConversion)) {
+    bullets.push(
+      snapshot.metrics.cashConversion < 50
+        ? "La conversione dell'EBITDA in cassa e' debole."
+        : "La conversione dell'EBITDA in cassa e' soddisfacente.",
+    );
+  }
+
+  if (isFiniteNumber(snapshot.metrics.ebitdaMargin) && snapshot.metrics.ebitdaMargin < 10) {
+    recommendations.push({
+      theme: "margini_pricing",
+      title: "Recuperare disciplina sul margine lordo-operativo",
+      description: "Rivedi pricing, mix prodotto e costi di struttura per rialzare il margine operativo prima di inseguire ulteriore crescita commerciale.",
+      rationale: "Con un margine operativo compresso, ogni euro di ricavo aggiuntivo rischia di generare poco valore e poca capacita' di autofinanziamento.",
+      evidence: `EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
+      priority: "high",
+    });
+  }
+  if (isFiniteNumber(latest?.nwc_pct_revenue) && latest.nwc_pct_revenue > 20) {
+    recommendations.push({
+      theme: "capitale_circolante",
+      title: "Ridurre l'assorbimento di capitale circolante",
+      description: "Imposta un piano operativo su incassi, scorte e termini fornitori con target puntuali di rilascio cassa nei prossimi 90-120 giorni.",
+      rationale: "Il capitale circolante sta assorbendo troppa cassa rispetto ai ricavi e limita la flessibilita' finanziaria dell'azienda.",
+      evidence: `Capitale circolante / ricavi ${latestYear}: ${isFiniteNumber(latest.nwc_pct_revenue) ? latest.nwc_pct_revenue.toFixed(1) : "N/D"}%.`,
+      priority: "high",
+    });
+  }
+  if (isFiniteNumber(latest?.net_debt_ebitda) && latest.net_debt_ebitda > 3) {
+    recommendations.push({
+      theme: "debito_struttura",
+      title: "Rimettere sotto controllo la leva",
+      description: "Rivedi profilo di rimborso, costo e struttura del debito prima di finanziare nuova crescita o nuovi investimenti.",
+      rationale: "Con leva elevata, la capacita' di assorbire volatilita' operativa si restringe e aumenta la sensibilita' verso banche e covenant impliciti.",
+      evidence: `Debito netto / EBITDA ${latestYear}: ${isFiniteNumber(latest.net_debt_ebitda) ? latest.net_debt_ebitda.toFixed(1) : "N/D"}x.`,
+      priority: "medium",
+    });
+  }
+  if (isFiniteNumber(snapshot.metrics.cashConversion) && snapshot.metrics.cashConversion < 60) {
+    recommendations.push({
+      theme: "allocazione_capitale",
+      title: "Riallineare EBITDA e generazione di cassa",
+      description: "Blocca capex non prioritario e imposta una soglia minima di ritorno di cassa per ogni iniziativa operativa o commerciale.",
+      rationale: "Se l'EBITDA non si trasforma in cassa, l'azienda cresce sulla carta ma non aumenta il proprio margine di manovra reale.",
+      evidence: `Cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%.`,
+      priority: "high",
+    });
+  }
+  if (isFiniteNumber(snapshot.metrics.revenueGrowth) || isFiniteNumber(snapshot.metrics.ebitdaMargin)) {
+    recommendations.push({
+      theme: "crescita_posizionamento",
+      title: "Separare crescita da crescita redditizia",
+      description: "Valuta linee prodotto, clienti e canali che assorbono capitale o comprimono il margine, e rialloca le risorse verso la parte del business che genera ritorni migliori.",
+      rationale: "La crescita crea valore solo se conserva marginalita' e non peggiora il profilo di cassa o di rischio finanziario.",
+      evidence: `Crescita ricavi ${latestYear}: ${isFiniteNumber(snapshot.metrics.revenueGrowth) ? snapshot.metrics.revenueGrowth.toFixed(1) : "N/D"}%; EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
+      priority: "medium",
+    });
+  }
+  if (recommendations.length === 0) {
+    recommendations.push({
+      theme: "margini_pricing",
+      title: "Proteggere qualita' della crescita",
+      description: "Proteggi margini e conversione in cassa prima di accelerare su nuova crescita, evitando espansione che consumi capitale invece di generarlo.",
+      rationale: "Anche in assenza di segnali di stress evidenti, il valore si difende mantenendo allineati crescita, redditivita' e cassa.",
+      evidence: `Cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%; EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
+      priority: "medium",
+    });
+  }
+
+  const requiredThemes: Array<"margini_pricing" | "capitale_circolante" | "debito_struttura" | "allocazione_capitale" | "crescita_posizionamento"> = [
+    "margini_pricing",
+    "capitale_circolante",
+    "debito_struttura",
+    "allocazione_capitale",
+    "crescita_posizionamento",
+  ];
+
+  for (const theme of requiredThemes) {
+    if (recommendations.some((item) => item.theme === theme)) continue;
+    if (theme === "margini_pricing") {
+      recommendations.push({
+        theme,
+        title: "Difendere prezzo e mix",
+        description: "Rivedi i segmenti a bassa resa economica e proteggi il margine con una disciplina piu' selettiva su listini, sconti e mix clienti.",
+        rationale: "Il pricing e il mix sono la leva piu' rapida per evitare che la crescita dei volumi eroda il ritorno operativo.",
+        evidence: `EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
+        priority: "medium",
+      });
+    }
+    if (theme === "capitale_circolante") {
+      recommendations.push({
+        theme,
+        title: "Mettere a target il rilascio di cassa operativo",
+        description: "Traduci crediti, scorte e pagamenti in target settimanali e responsabilita' operative, invece di gestire il circolante solo a consuntivo.",
+        rationale: "Il circolante non si corregge a fine anno: serve una disciplina commerciale e operativa continua.",
+        evidence: `DSO ${latestYear}: ${isFiniteNumber(latest?.dso) ? latest.dso.toFixed(0) : "N/D"} gg; DIO ${latestYear}: ${isFiniteNumber(latest?.dio) ? latest.dio.toFixed(0) : "N/D"} gg; DPO ${latestYear}: ${isFiniteNumber(latest?.dpo) ? latest.dpo.toFixed(0) : "N/D"} gg.`,
+        priority: "medium",
+      });
+    }
+    if (theme === "debito_struttura") {
+      recommendations.push({
+        theme,
+        title: "Preservare headroom finanziaria",
+        description: "Mantieni margine di manovra su linee e covenant impliciti prima di assumere nuovo fabbisogno da crescita o investimenti.",
+        rationale: "La resilienza finanziaria si costruisce prima dello stress, non dopo.",
+        evidence: `Debito netto / EBITDA ${latestYear}: ${isFiniteNumber(latest?.net_debt_ebitda) ? latest.net_debt_ebitda.toFixed(1) : "N/D"}x; Debt / Equity ${latestYear}: ${isFiniteNumber(latest?.debt_equity) ? latest.debt_equity.toFixed(1) : "N/D"}x.`,
+        priority: "medium",
+      });
+    }
+    if (theme === "allocazione_capitale") {
+      recommendations.push({
+        theme,
+        title: "Stringere le priorita' di investimento",
+        description: "Rendi il capex piu' selettivo e subordinato a ritorni rapidi in cassa, soprattutto finche' il business non converte stabilmente EBITDA in UFCF.",
+        rationale: "L'allocazione del capitale e' la leva che piu' rapidamente cambia la qualita' del rendimento per soci e finanziatori.",
+        evidence: `UFCF ${latestYear}: ${isFiniteNumber(latest?.unlevered_free_cash_flow) ? (latest.unlevered_free_cash_flow / 1_000_000).toFixed(1) : "N/D"}m; Cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%.`,
+        priority: "medium",
+      });
+    }
+    if (theme === "crescita_posizionamento") {
+      recommendations.push({
+        theme,
+        title: "Concentrare la crescita dove il ritorno e' difendibile",
+        description: "Confronta i segmenti che crescono con quelli che mantengono margini e cassa, e sposta risorse verso le aree con economics piu' robusti.",
+        rationale: "La qualita' del posizionamento si misura nella capacita' di crescere senza distruggere cassa o rendimento operativo.",
+        evidence: `Ricavi ${latestYear}: ${isFiniteNumber(latest?.fatturato) ? (latest.fatturato / 1_000_000).toFixed(1) : "N/D"}m; EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
+        priority: "low",
+      });
+    }
+  }
+
+  return {
+    marketBenchmarks: {
+      metrics: [] as any[],
+      sources: [] as Array<{ title: string; url: string }>,
+    },
+    workingCapitalDebt: {
+      summary: bullets[0] || "La lettura di capitale circolante e debito resta limitata ai dati effettivamente disponibili.",
+      bullets: bullets.length > 0 ? bullets : ["Servono piu' dettagli di bilancio per una lettura completa di circolante e debito."],
+    },
+    recommendations: recommendations.slice(0, 5),
+  };
+}
+
+function buildRecommendationContext(companyDetails: any, financialData: any, marketBenchmarks: any, description: string) {
+  const snapshot = getLatestFinancialSnapshot(financialData);
+  const bilanci = financialData?.bilanci && typeof financialData.bilanci === "object" ? financialData.bilanci : {};
+  const latestYear = snapshot.latestYear;
+  const previousYear = snapshot.years[1] || null;
+  const latest = latestYear ? bilanci?.[latestYear] : null;
+  const previous = previousYear ? bilanci?.[previousYear] : null;
+
+  return {
+    companyName: companyDetails?.denominazione || null,
+    location: [companyDetails?.comune, companyDetails?.provincia].filter(Boolean).join(", ") || null,
+    businessDescription: description || null,
+    latestYear,
+    previousYear,
+    latestMetrics: latest
+      ? {
+          revenue: latest?.fatturato ?? null,
+          ebitda: latest?.ebitda ?? null,
+          ebitdaMargin: snapshot.metrics.ebitdaMargin,
+          netIncome: latest?.utile_netto ?? null,
+          netMargin: snapshot.metrics.netMargin,
+          cashConversion: snapshot.metrics.cashConversion,
+          nwc: latest?.nwc ?? null,
+          nwcPctRevenue: latest?.nwc_pct_revenue ?? null,
+          dso: latest?.dso ?? null,
+          dio: latest?.dio ?? null,
+          dpo: latest?.dpo ?? null,
+          netDebt: latest?.net_debt ?? null,
+          netDebtEbitda: latest?.net_debt_ebitda ?? null,
+          debtEquity: latest?.debt_equity ?? null,
+        }
+      : null,
+    deltaVsPreviousYear: previous && latest
+      ? {
+          revenueGrowthPct: calculatePercentage((latest?.fatturato ?? 0) - (previous?.fatturato ?? 0), previous?.fatturato),
+          ebitdaMarginChangePts:
+            isFiniteNumber(snapshot.metrics.ebitdaMargin) && isFiniteNumber(calculatePercentage(previous?.ebitda, previous?.fatturato))
+              ? Number((snapshot.metrics.ebitdaMargin - calculatePercentage(previous?.ebitda, previous?.fatturato)!).toFixed(1))
+              : null,
+          cashConversionChangePts:
+            isFiniteNumber(latest?.cash_conversion) && isFiniteNumber(previous?.cash_conversion)
+              ? Number((latest.cash_conversion - previous.cash_conversion).toFixed(1))
+              : null,
+          nwcPctRevenueChangePts:
+            isFiniteNumber(latest?.nwc_pct_revenue) && isFiniteNumber(previous?.nwc_pct_revenue)
+              ? Number((latest.nwc_pct_revenue - previous.nwc_pct_revenue).toFixed(1))
+              : null,
+          netDebtEbitdaChange:
+            isFiniteNumber(latest?.net_debt_ebitda) && isFiniteNumber(previous?.net_debt_ebitda)
+              ? Number((latest.net_debt_ebitda - previous.net_debt_ebitda).toFixed(1))
+              : null,
+        }
+      : null,
+    history: snapshot.years.slice().reverse().map((year) => ({
+      year,
+      revenue: bilanci?.[year]?.fatturato ?? null,
+      ebitda: bilanci?.[year]?.ebitda ?? null,
+      ebitdaMargin: calculatePercentage(bilanci?.[year]?.ebitda, bilanci?.[year]?.fatturato),
+      netIncome: bilanci?.[year]?.utile_netto ?? null,
+      netMargin: calculatePercentage(bilanci?.[year]?.utile_netto, bilanci?.[year]?.fatturato),
+      cashConversion: bilanci?.[year]?.cash_conversion ?? null,
+      nwcPctRevenue: bilanci?.[year]?.nwc_pct_revenue ?? null,
+      dso: bilanci?.[year]?.dso ?? null,
+      dio: bilanci?.[year]?.dio ?? null,
+      dpo: bilanci?.[year]?.dpo ?? null,
+      netDebtEbitda: bilanci?.[year]?.net_debt_ebitda ?? null,
+    })),
+    marketBenchmarks: Array.isArray(marketBenchmarks?.metrics)
+      ? marketBenchmarks.metrics.map((item: any) => ({
+          metric: item?.metric ?? null,
+          companyValue: item?.companyValue ?? null,
+          marketRangeLow: item?.marketRangeLow ?? null,
+          marketRangeHigh: item?.marketRangeHigh ?? null,
+          status: item?.status ?? null,
+          comment: item?.comment ?? null,
+          confidence: item?.confidence ?? null,
+        }))
+      : [],
+    recommendationTracks: [
+      "margini_pricing",
+      "capitale_circolante",
+      "debito_struttura",
+      "allocazione_capitale",
+      "crescita_posizionamento",
+    ],
+  };
+}
+
+function mergeRecommendations(primary: any, fallback: any) {
+  const merged: any[] = [];
+  const seen = new Set<string>();
+
+  for (const source of [Array.isArray(primary) ? primary : [], Array.isArray(fallback) ? fallback : []]) {
+    for (const item of source) {
+      if (!item || typeof item !== "object") continue;
+      const title = typeof item.title === "string" ? item.title.trim() : "";
+      const theme = typeof item.theme === "string" ? item.theme.trim() : "";
+      const description = typeof item.description === "string" ? item.description.trim() : "";
+      const rationale = typeof item.rationale === "string" ? item.rationale.trim() : "";
+      const evidence = typeof item.evidence === "string" ? item.evidence.trim() : "";
+      const priority =
+        item.priority === "high" || item.priority === "medium" || item.priority === "low"
+          ? item.priority
+          : "medium";
+      const key = `${theme}::${title}`.toLowerCase();
+      if (!title || !description || seen.has(key)) continue;
+      seen.add(key);
+      merged.push({
+        theme: theme || "crescita_posizionamento",
+        title,
+        description,
+        rationale,
+        evidence,
+        priority,
+      });
+      if (merged.length >= 5) return merged;
+    }
+  }
+
+  return merged;
+}
+
+async function generateRecommendationMemo(companyDetails: any, financialData: any, marketBenchmarks: any, description: string) {
+  const apiKey = getOpenaiApiKey();
+  if (!apiKey) return null;
+
+  const context = buildRecommendationContext(companyDetails, financialData, marketBenchmarks, description);
+  if (!context.latestYear) return null;
+
+  try {
+    const { text } = await createTextResponse({
+      apiKey,
+      model: getOpenaiChatModel(),
+      instructions: `Sei un partner di strategic advisory e debt advisory mid-market.
+Scrivi un memo interno, non marketing, come se stessi preparando il punto di vista finale per CEO, socio industriale o comitato crediti.
+Obiettivo:
+- isolare i 2-4 veri problemi economico-finanziari o punti di forza che contano
+- spiegare perche' contano in termini di valore, bancabilita', cassa e opzioni strategiche
+- trasformarli in azioni manageriali concrete
+Regole:
+- usa numeri e anni specifici quando disponibili
+- non fare riassunti scolastici del bilancio
+- non usare banalita' tipo "monitorare", "ottimizzare", "migliorare l'efficienza" senza dire come e perche'
+- niente frasi meta sulle fonti
+- se l'azienda e' forte, spiega come proteggere quel vantaggio
+- tono secco, da advisor senior; niente marketing`,
+      input: [{
+        role: "user",
+        content: [{
+          type: "input_text",
+          text: JSON.stringify(context, null, 2),
+        }],
+      }],
+      maxOutputTokens: 2800,
+      reasoningEffort: "high",
+    });
+
+    return text.trim() || null;
+  } catch (error: any) {
+    console.warn("Recommendation memo generation fallback:", error?.message || error);
+    return null;
+  }
+}
+
+async function generateMarketBenchmarks(companyDetails: any, financialData: any, description: string) {
+  const apiKey = getOpenaiApiKey();
+  const snapshot = getLatestFinancialSnapshot(financialData);
+  const fallback = buildFallbackInsights(financialData).marketBenchmarks;
+
+  if (!apiKey || !snapshot.latestYear) {
+    return fallback;
+  }
+
+  try {
+    const metrics = [
+      { metric: "EBITDA margin", companyValue: snapshot.metrics.ebitdaMargin, unit: "percent" },
+      { metric: "Net margin", companyValue: snapshot.metrics.netMargin, unit: "percent" },
+      { metric: "Revenue growth", companyValue: snapshot.metrics.revenueGrowth, unit: "percent" },
+      { metric: "Cash conversion", companyValue: snapshot.metrics.cashConversion, unit: "percent" },
+    ];
+
+    const result = await createStructuredResponse<{
+      metrics: Array<{
+        metric: string;
+        companyValue: number | null;
+        marketRangeLow: number | null;
+        marketRangeHigh: number | null;
+        status: "below" | "in_line" | "above" | "insufficient_data";
+        comment: string;
+        confidence: "high" | "medium" | "low";
+        sources: Array<{ title: string; url: string }>;
+      }>;
+    }>({
+      apiKey,
+      model: getOpenaiChatModel(),
+      instructions: `Sei un equity research analyst focalizzato sul mercato italiano.
+Devi produrre benchmark di mercato come range di riferimento per un'azienda italiana.
+Regole:
+- usa il web search per trovare range tipici di mercato o operatori comparabili
+- ragiona sul sotto-settore implicito dal business model, non nominare codici ATECO
+- niente frasi meta come "in base al sito", "in base al codice ATECO", "presumibilmente" o "verosimilmente"
+- se un range non e' abbastanza robusto, usa null e status "insufficient_data"
+- mantieni commenti brevi, concreti e leggibili da imprenditore`,
+      input: [{
+        role: "user",
+        content: [{
+          type: "input_text",
+          text: JSON.stringify({
+            companyName: companyDetails?.denominazione || null,
+            location: [companyDetails?.comune, companyDetails?.provincia].filter(Boolean).join(", ") || null,
+            businessDescription: description || null,
+            latestYear: snapshot.latestYear,
+            latestMetrics: metrics,
+            financialHistory: snapshot.years.map((year) => ({
+              year,
+              revenue: financialData?.bilanci?.[year]?.fatturato ?? null,
+              ebitda: financialData?.bilanci?.[year]?.ebitda ?? null,
+              ebitdaMargin: calculatePercentage(financialData?.bilanci?.[year]?.ebitda, financialData?.bilanci?.[year]?.fatturato),
+            })),
+          }, null, 2),
+        }],
+      }],
+      tools: [{
+        type: "web_search",
+        user_location: {
+          type: "approximate",
+          country: "IT",
+          city: typeof companyDetails?.comune === "string" ? companyDetails.comune : undefined,
+          region: typeof companyDetails?.provincia === "string" ? companyDetails.provincia : undefined,
+        },
+      }],
+      toolChoice: "auto",
+      schemaName: "market_benchmarks",
+      schema: MARKET_BENCHMARK_SCHEMA,
+      maxOutputTokens: 3000,
+      reasoningEffort: "medium",
+    });
+
+    const companyMetricMap = new Map(metrics.map((item) => [item.metric.toLowerCase(), item.companyValue]));
+    return {
+      metrics: Array.isArray(result?.metrics)
+        ? result.metrics.slice(0, 4).map((item) => ({
+            ...item,
+            companyValue: companyMetricMap.get(String(item.metric || "").toLowerCase()) ?? item.companyValue ?? null,
+          }))
+        : [],
+      sources: dedupeInsightSources((result?.metrics || []).flatMap((item) => item.sources || [])),
+    };
+  } catch (error: any) {
+    console.warn("Market benchmark generation fallback:", error?.message || error);
+    return fallback;
+  }
+}
+
+async function generateWorkingCapitalDebtAndRecommendations(companyDetails: any, financialData: any, marketBenchmarks: any, description: string) {
+  const apiKey = getOpenaiApiKey();
+  const fallback = buildFallbackInsights(financialData);
+
+  if (!apiKey) {
+    return {
+      workingCapitalDebt: fallback.workingCapitalDebt,
+      recommendations: fallback.recommendations,
+    };
+  }
+
+  try {
+    const context = buildRecommendationContext(companyDetails, financialData, marketBenchmarks, description);
+    const strategyMemo = await generateRecommendationMemo(companyDetails, financialData, marketBenchmarks, description);
+    const result = await createStructuredResponse<{
+      workingCapitalDebt: {
+        summary: string;
+        bullets: string[];
+      };
+      recommendations: Array<{
+        title: string;
+        description: string;
+        rationale: string;
+        evidence: string;
+        priority: "high" | "medium" | "low";
+      }>;
+    }>({
+      apiKey,
+      model: getOpenaiChatModel(),
+      instructions: `Sei un consulente strategico-finanziario senior che scrive l'ultima pagina di un investment memo / credit memo per una PMI italiana.
+Hai gia' a disposizione un memo interno di lavoro e un set di numeri strutturati. Il tuo compito non e' commentare genericamente i dati, ma trasformarli in una diagnosi manageriale e in raccomandazioni vere.
+Restituisci:
+- una diagnosi sintetica di working capital e debito
+- 4-5 raccomandazioni prioritarie
+Regole:
+- scrivi come un advisor serio, non come un assistente generalista
+- ogni raccomandazione deve avere un focus diverso e non ripetere la stessa idea con parole diverse
+- devi coprire il piu' possibile le cinque piste seguenti, se i dati lo consentono: margini/pricing, capitale circolante, debito/struttura finanziaria, allocazione del capitale, crescita/posizionamento
+- non e' accettabile restituire una sola raccomandazione o raccomandazioni quasi duplicate
+- parti dal problema economico-finanziario, spiega perche' conta e prescrivi un'azione concreta nei prossimi 90-180 giorni
+- usa numeri e anni specifici come evidenza quando disponibili
+- se i benchmark esistono, spiega esplicitamente dove l'azienda e' sopra o sotto il mercato
+- privilegia pricing, mix, struttura costi, rilascio cassa, disciplina commerciale, scorte, struttura del debito, covenant capacity, priorita' di capex
+- evita assolutamente formule vuote come "monitorare", "migliorare l'efficienza", "tenere sotto controllo" se non sono accompagnate da una leva precisa
+- niente meta-commenti sulle fonti o sulla qualita' del modello
+- niente informazioni non supportate dai dati
+- se i dati sono incompleti, resta prudente ma produci comunque indicazioni utili e concrete
+- nella descrizione:
+  - description = cosa fare
+  - rationale = perche' conta economicamente
+  - evidence = numero/anno/gap che giustifica l'azione`,
+      input: [{
+        role: "user",
+        content: [{
+          type: "input_text",
+          text: JSON.stringify({
+            advisorMemo: strategyMemo,
+            companyContext: context,
+          }, null, 2),
+        }],
+      }],
+      schemaName: "working_capital_recommendations",
+      schema: WORKING_CAPITAL_RECOMMENDATIONS_SCHEMA,
+      maxOutputTokens: 3600,
+      reasoningEffort: "high",
+    });
+
+    const recommendations = mergeRecommendations(result?.recommendations, fallback.recommendations);
+
+    return {
+      workingCapitalDebt: {
+        summary: typeof result?.workingCapitalDebt?.summary === "string"
+          ? result.workingCapitalDebt.summary.trim()
+          : fallback.workingCapitalDebt.summary,
+        bullets: Array.isArray(result?.workingCapitalDebt?.bullets) && result.workingCapitalDebt.bullets.length > 0
+          ? result.workingCapitalDebt.bullets.slice(0, 4)
+          : fallback.workingCapitalDebt.bullets,
+      },
+      recommendations,
+    };
+  } catch (error: any) {
+    console.warn("Recommendations generation fallback:", error?.message || error);
+    return {
+      workingCapitalDebt: fallback.workingCapitalDebt,
+      recommendations: fallback.recommendations,
+    };
+  }
+}
+
 export function registerRoutes(server: Server, app: Express): void {
 
   // ==========================================
@@ -1700,6 +2600,169 @@ export function registerRoutes(server: Server, app: Express): void {
     const user = await getOrCreateUserFromSupabaseToken(token);
     if (!user) return res.status(401).json({ error: "Token non valido" });
     return res.json({ user });
+  });
+
+  app.get("/api/private-bilanci", async (req: Request, res: Response) => {
+    try {
+      const userId = await getUserIdFromReq(req);
+      if (!userId) return res.status(401).json({ error: "Non autenticato" });
+
+      const companyId = typeof req.query.companyId === "string" ? req.query.companyId.trim() : "";
+      if (!companyId) {
+        return res.status(400).json({ error: "companyId è richiesto" });
+      }
+
+      const documents = await storage.listUserUploadedBilanci(userId, companyId);
+      return res.json({ data: documents });
+    } catch (error: any) {
+      console.error("Private bilanci list error:", error);
+      return res.status(500).json({ error: "Errore nel recupero dei bilanci caricati" });
+    }
+  });
+
+  app.post("/api/private-bilanci/upload", async (req: Request, res: Response) => {
+    try {
+      const userId = await getUserIdFromReq(req);
+      if (!userId) return res.status(401).json({ error: "Non autenticato" });
+
+      const formData = await readMultipartFormData(req);
+      const companyId = typeof formData.get("companyId") === "string" ? String(formData.get("companyId")).trim() : "";
+      const taxCode = typeof formData.get("taxCode") === "string" ? String(formData.get("taxCode")).trim() : null;
+      const year = extractYear(typeof formData.get("year") === "string" ? String(formData.get("year")).trim() : "") || "";
+      const file = formData.get("file");
+
+      if (!companyId || !year) {
+        return res.status(400).json({ error: "companyId e year sono richiesti" });
+      }
+
+      if (!file || typeof (file as any).arrayBuffer !== "function") {
+        return res.status(400).json({ error: "File mancante" });
+      }
+
+      const originalName =
+        typeof (file as any).name === "string" && (file as any).name.trim()
+          ? (file as any).name.trim()
+          : `bilancio-${year}`;
+      const mimeType =
+        typeof (file as any).type === "string" && (file as any).type.trim()
+          ? (file as any).type.trim()
+          : "application/octet-stream";
+
+      const lowerName = originalName.toLowerCase();
+      const isAllowedFile =
+        mimeType.includes("pdf") ||
+        mimeType.includes("json") ||
+        mimeType.includes("xml") ||
+        mimeType.includes("zip") ||
+        lowerName.endsWith(".pdf") ||
+        lowerName.endsWith(".json") ||
+        lowerName.endsWith(".xml") ||
+        lowerName.endsWith(".xbrl") ||
+        lowerName.endsWith(".zip");
+
+      if (!isAllowedFile) {
+        return res.status(400).json({ error: "Formato file non supportato. Carica PDF, XBRL, XML, JSON o ZIP." });
+      }
+
+      const buffer = Buffer.from(await (file as any).arrayBuffer());
+      const storedDocument = await persistPrivateBilancioDocument(
+        userId,
+        companyId,
+        year,
+        0,
+        { name: originalName },
+        buffer,
+        mimeType,
+      );
+      const extractedData = extractStructuredBilancioData(
+        buffer,
+        storedDocument.mimeType,
+        storedDocument.originalName || storedDocument.filename,
+        year,
+      );
+
+      const document = await storage.createUserUploadedBilancio({
+        userId,
+        companyId,
+        taxCode,
+        year,
+        mimeType: storedDocument.mimeType,
+        storagePath: storedDocument.storageKey,
+        bucket: storedDocument.bucket ?? null,
+        storageBackend: storedDocument.storageBackend || "local",
+        originalName: storedDocument.originalName || storedDocument.filename,
+        sizeBytes: storedDocument.sizeBytes,
+        extractedData: extractedData as Record<string, unknown> | null,
+        source: "user_upload",
+        createdAt: new Date().toISOString(),
+      });
+
+      return res.json({ data: document });
+    } catch (error: any) {
+      console.error("Private bilancio upload error:", error);
+      return res.status(500).json({ error: "Errore nel caricamento del bilancio" });
+    }
+  });
+
+  app.get("/api/private-bilanci/:id/file", async (req: Request, res: Response) => {
+    try {
+      const userId = await getUserIdFromReq(req, true);
+      if (!userId) return res.status(401).json({ error: "Non autenticato" });
+
+      const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const id = Number.parseInt(idParam || "", 10);
+      if (!Number.isFinite(id)) {
+        return res.status(400).json({ error: "ID documento non valido" });
+      }
+
+      const document = await storage.getUserUploadedBilancio(userId, id);
+      if (!document) {
+        return res.status(404).json({ error: "Documento non trovato" });
+      }
+
+      const buffer = await readStoredBilancioDocument({
+        storageKey: document.storagePath,
+        storageBackend: document.storageBackend,
+        bucket: document.bucket,
+      });
+
+      const filename = document.originalName || `bilancio-${document.year}`;
+      res.setHeader("Content-Type", document.mimeType || "application/octet-stream");
+      res.setHeader("Content-Disposition", `${isStoredInlineBilancioDocument({ mimeType: document.mimeType, originalName: filename }) ? "inline" : "attachment"}; filename="${filename.replace(/"/g, "")}"`);
+      return res.send(buffer);
+    } catch (error: any) {
+      console.error("Private bilancio file error:", error);
+      return res.status(500).json({ error: "Errore nel recupero del documento" });
+    }
+  });
+
+  app.delete("/api/private-bilanci/:id", async (req: Request, res: Response) => {
+    try {
+      const userId = await getUserIdFromReq(req);
+      if (!userId) return res.status(401).json({ error: "Non autenticato" });
+
+      const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const id = Number.parseInt(idParam || "", 10);
+      if (!Number.isFinite(id)) {
+        return res.status(400).json({ error: "ID documento non valido" });
+      }
+
+      const existing = await storage.getUserUploadedBilancio(userId, id);
+      if (!existing) {
+        return res.status(404).json({ error: "Documento non trovato" });
+      }
+
+      await deleteStoredBilancioDocument({
+        storageKey: existing.storagePath,
+        storageBackend: existing.storageBackend,
+        bucket: existing.bucket,
+      });
+      await storage.deleteUserUploadedBilancio(userId, id);
+      return res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Private bilancio delete error:", error);
+      return res.status(500).json({ error: "Errore nella cancellazione del documento" });
+    }
   });
 
   app.get("/api/billing/me", async (req: Request, res: Response) => {
@@ -1965,6 +3028,14 @@ export function registerRoutes(server: Server, app: Express): void {
     }
 
     try {
+      let localResults: Awaited<ReturnType<typeof searchLocalCompanyResults>> | null = null;
+      const getLocalResults = async () => {
+        if (!localResults) {
+          localResults = await searchLocalCompanyResults(query);
+        }
+        return localResults;
+      };
+
       const searchQueries = buildCompanySearchQueries(query);
       const mergedCandidates: Array<{ id: string; sourceRank: number }> = [];
       const seenIds = new Set<string>();
@@ -1977,6 +3048,10 @@ export function registerRoutes(server: Server, app: Express): void {
 
         if (!searchRes.ok) {
           console.error("IT-search error:", searchRes.status, searchQuery);
+          const fallbackResults = await getLocalResults();
+          if (fallbackResults.length > 0) {
+            break;
+          }
           if (mode === "sse") {
             res.setHeader("Content-Type", "text/event-stream");
             res.setHeader("Cache-Control", "no-cache");
@@ -2012,6 +3087,20 @@ export function registerRoutes(server: Server, app: Express): void {
       const ids = mergedCandidates.map((item) => item.id);
 
       if (ids.length === 0) {
+        const fallbackResults = await getLocalResults();
+        if (fallbackResults.length > 0) {
+          if (mode === "sse") {
+            res.setHeader("Content-Type", "text/event-stream");
+            res.setHeader("Cache-Control", "no-cache");
+            res.setHeader("Connection", "keep-alive");
+            for (const item of fallbackResults) {
+              res.write(`data: ${JSON.stringify({ company: item })}\n\n`);
+            }
+            res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+            return res.end();
+          }
+          return res.json({ data: fallbackResults });
+        }
         if (mode === "sse") {
           res.setHeader("Content-Type", "text/event-stream");
           res.setHeader("Cache-Control", "no-cache");
@@ -2077,10 +3166,12 @@ export function registerRoutes(server: Server, app: Express): void {
         })
         .map(({ _score, _sourceRank, ...company }) => company);
 
-      if (results.length > 0) {
+      const finalResults = results.length > 0 ? results : await getLocalResults();
+
+      if (finalResults.length > 0) {
         const now = Date.now();
-        searchCache.set(queryCacheKey, { data: results, ts: now });
-        for (const r of results) {
+        searchCache.set(queryCacheKey, { data: finalResults, ts: now });
+        for (const r of finalResults) {
           searchCache.set(`company:${r.id}`, { data: r, ts: now });
         }
       }
@@ -2091,7 +3182,7 @@ export function registerRoutes(server: Server, app: Express): void {
         res.setHeader("Connection", "keep-alive");
         res.setHeader("X-Accel-Buffering", "no");
 
-        for (const item of results) {
+        for (const item of finalResults) {
           if (res.writableEnded) break;
           res.write(`data: ${JSON.stringify({ company: item })}\n\n`);
         }
@@ -2101,7 +3192,7 @@ export function registerRoutes(server: Server, app: Express): void {
           res.end();
         }
       } else {
-        return res.json({ data: results });
+        return res.json({ data: finalResults });
       }
     } catch (error: any) {
       console.error("Search error:", error);
@@ -2219,6 +3310,7 @@ export function registerRoutes(server: Server, app: Express): void {
       const normalizedCompanyId = typeof companyId === "string" ? companyId.trim() : "";
       const normalizedTaxCode = typeof taxCode === "string" ? taxCode.trim() : "";
       const normalizedVatCode = typeof vatCode === "string" ? vatCode.trim() : "";
+      const documentPreference = req.body?.documentPreference === "upload" ? "upload" : "openapi";
       const resolvedTaxCodeForDocuEngine = normalizedTaxCode || normalizedVatCode;
       billedCompanyId = normalizedCompanyId;
 
@@ -2281,9 +3373,9 @@ export function registerRoutes(server: Server, app: Express): void {
               error: "Credito insufficiente per avviare l'analisi business.",
               code: "INSUFFICIENT_CREDIT",
               balanceCents: billingResult.balanceCents,
-            requiredCents: businessAnalysisCents,
-            missingCents: billingResult.missingCents,
-          });
+              requiredCents: businessAnalysisCents,
+              missingCents: billingResult.missingCents,
+            });
           }
           businessChargeApplied = true;
         }
@@ -2292,7 +3384,11 @@ export function registerRoutes(server: Server, app: Express): void {
       const previousBusinessCache =
         (normalizedTaxCode ? await storage.getCachedCompanyFullDataByTaxCode(normalizedTaxCode) : undefined) ||
         (normalizedVatCode ? await storage.getCachedCompanyFullDataByTaxCode(normalizedVatCode) : undefined) ||
-        (await storage.getCachedCompanyFullData(normalizedCompanyId));
+        (await storage.getCachedCompanyFullData(normalizedCompanyId)) ||
+        (await findReusableBusinessSnapshot(
+          normalizedCompanyId,
+          [normalizedTaxCode, normalizedVatCode].filter((value): value is string => Boolean(value)),
+        ));
 
       // --- 1. IT-advanced: dettagli azienda e anni disponibili ---
       let companyDetails: any =
@@ -2378,6 +3474,15 @@ export function registerRoutes(server: Server, app: Express): void {
         companyDetails?.partita_iva ||
         resolvedTaxCodeForDocuEngine;
       billedTaxCode = finalTaxCode || resolvedTaxCodeForDocuEngine;
+      const userUploadedDocuments =
+        documentPreference === "upload"
+          ? await storage.listUserUploadedBilanci(userId, normalizedCompanyId)
+          : [];
+      const userUploadedBilanci = buildUserUploadedBilanciPackage(userUploadedDocuments);
+
+      if (documentPreference === "upload" && Object.keys(userUploadedBilanci).length === 0) {
+        return failWithRefund(400, "Hai scelto di usare i tuoi bilanci, ma non hai ancora caricato nessun documento.");
+      }
 
       if (!finalTaxCode) {
         return failWithRefund(400, "Codice fiscale o partita IVA non disponibili per il bilancio ottico");
@@ -2387,14 +3492,19 @@ export function registerRoutes(server: Server, app: Express): void {
         (await storage.getCachedBilancioPackageByTaxCode(finalTaxCode)) ||
         (await storage.getCachedBilancioPackage(normalizedCompanyId));
       let purchasedBilanci = getPurchasedBilanciBySource(cachedPackage, BILANCIO_OTTICO_PDF_SOURCE);
+      let resolvedBilanciEntries = {
+        ...purchasedBilanci,
+        ...userUploadedBilanci,
+      };
       const cachedAvailableYears = Object.keys(purchasedBilanci || {}).sort((a, b) => b.localeCompare(a));
+      const uploadedAvailableYears = Object.keys(userUploadedBilanci || {}).sort((a, b) => b.localeCompare(a));
       const summaryAvailableYears = Object.keys(companyDetails?.dettaglio?.bilanci || {})
         .filter((year) => Boolean(extractYear(year)))
         .sort((a, b) => b.localeCompare(a));
-      const knownAvailableYears = Array.from(new Set([...cachedAvailableYears, ...summaryAvailableYears]))
+      const knownAvailableYears = Array.from(new Set([...cachedAvailableYears, ...uploadedAvailableYears, ...summaryAvailableYears]))
         .sort((a, b) => b.localeCompare(a));
 
-      let latestYear = cachedAvailableYears[0] || knownAvailableYears[0] || "";
+      let latestYear = knownAvailableYears[0] || "";
       if (!latestYear) {
         return failWithRefund(502, "Nessun bilancio ottico disponibile per questa societa'.");
       }
@@ -2413,7 +3523,7 @@ export function registerRoutes(server: Server, app: Express): void {
       let probeSearchRequest:
         | { requestId: string; state: unknown; results: any[] }
         | null = null;
-      let missingPurchaseYears = purchaseYears.filter((year) => !purchasedBilanci[year]);
+      let missingPurchaseYears = purchaseYears.filter((year) => !resolvedBilanciEntries[year]);
       const purchaseErrors: string[] = [];
 
       if (missingPurchaseYears.length > 0) {
@@ -2427,24 +3537,24 @@ export function registerRoutes(server: Server, app: Express): void {
             ),
           ).sort((a, b) => b.localeCompare(a));
 
-          availableYears = Array.from(new Set([...cachedAvailableYears, ...docuEngineAvailableYears]))
+          availableYears = Array.from(new Set([...cachedAvailableYears, ...uploadedAvailableYears, ...docuEngineAvailableYears]))
             .sort((a, b) => b.localeCompare(a));
-          latestYear = cachedAvailableYears[0] || docuEngineAvailableYears[0] || latestYear;
+          latestYear = availableYears[0] || latestYear;
           purchaseYears = buildPurchaseYears(latestYear, availableYears);
           coveredYears = buildCoveredYears(latestYear);
-          missingPurchaseYears = purchaseYears.filter((year) => !purchasedBilanci[year]);
+          missingPurchaseYears = purchaseYears.filter((year) => !resolvedBilanciEntries[year]);
         } catch (error: any) {
           purchaseErrors.push(error?.message || "Errore nella ricerca bilancio ottico");
 
-          if (cachedAvailableYears.length === 0) {
+          if (cachedAvailableYears.length === 0 && uploadedAvailableYears.length === 0) {
             throw error;
           }
 
-          availableYears = cachedAvailableYears;
-          latestYear = cachedAvailableYears[0];
+          availableYears = Array.from(new Set([...cachedAvailableYears, ...uploadedAvailableYears])).sort((a, b) => b.localeCompare(a));
+          latestYear = availableYears[0];
           purchaseYears = buildPurchaseYears(latestYear, availableYears);
           coveredYears = buildCoveredYears(latestYear);
-          missingPurchaseYears = purchaseYears.filter((year) => !purchasedBilanci[year]);
+          missingPurchaseYears = purchaseYears.filter((year) => !resolvedBilanciEntries[year]);
         }
       }
 
@@ -2500,13 +3610,22 @@ export function registerRoutes(server: Server, app: Express): void {
           };
           const pkg = await storage.cachePurchasedBilancio(normalizedCompanyId, finalTaxCode, year, storedDocuments, bilancioData);
           purchasedBilanci = getPurchasedBilanciBySource(pkg, BILANCIO_OTTICO_PDF_SOURCE);
+          resolvedBilanciEntries = {
+            ...purchasedBilanci,
+            ...userUploadedBilanci,
+          };
         } catch (e: any) {
           purchaseErrors.push(e?.message || `Errore nel download del bilancio ottico ${year}`);
           console.warn(`Bilancio ottico download failed for year ${year}:`, e?.message);
         }
       }
 
-      let comparativeBilanci = buildBilanciFromComparativeXbrl(purchasedBilanci, coveredYears);
+      resolvedBilanciEntries = {
+        ...purchasedBilanci,
+        ...userUploadedBilanci,
+      };
+
+      let comparativeBilanci = buildBilanciFromComparativeXbrl(resolvedBilanciEntries, coveredYears);
       if (hasUsableBilancioOtticoBusinessCache(previousBusinessCache)) {
         comparativeBilanci = mergeComparativeBilanci(
           comparativeBilanci,
@@ -2518,7 +3637,7 @@ export function registerRoutes(server: Server, app: Express): void {
 
       if (shouldEnrichComparativeBilanciWithAi(comparativeBilanci, coveredYears)) {
         try {
-          const extractedBilanci = await extractComparativeBilanciFromOtticoPdfs(purchasedBilanci, purchaseYears, coveredYears);
+          const extractedBilanci = await extractComparativeBilanciFromOtticoPdfs(resolvedBilanciEntries, purchaseYears, coveredYears);
           if (extractedBilanci) {
             comparativeBilanci = mergeComparativeBilanci(comparativeBilanci, extractedBilanci, coveredYears);
             hasAnyParsedPeriod = Object.values(comparativeBilanci).some((yearData: any) => yearData?.status === "ok");
@@ -2559,16 +3678,47 @@ export function registerRoutes(server: Server, app: Express): void {
         return failWithRefund(statusCode, failureMessage);
       }
 
+      const documentSource =
+        Object.keys(userUploadedBilanci).length > 0 && Object.keys(purchasedBilanci).length > 0
+          ? "mixed"
+          : Object.keys(userUploadedBilanci).length > 0
+            ? "user_upload"
+            : "openapi";
+
       const financialData = {
         source: BILANCIO_OTTICO_COMPARATIVE_SOURCE,
         purchaseYears,
         coveredYears,
         bilanci: comparativeBilanci,
         purchasedBilanci,
+        userUploadedBilanci,
+        documentSource,
         fetchedAt: new Date().toISOString(),
       };
 
       const descriptionPayload = await generatePrivateEquityCompanyDescription(companyDetails, financialData);
+      const marketBenchmarks = await generateMarketBenchmarks(
+        companyDetails,
+        financialData,
+        descriptionPayload.description,
+      );
+      const recommendationPayload = await generateWorkingCapitalDebtAndRecommendations(
+        companyDetails,
+        financialData,
+        marketBenchmarks,
+        descriptionPayload.description,
+      );
+      const insights = {
+        version: BUSINESS_INSIGHTS_VERSION,
+        marketBenchmarks,
+        workingCapitalDebt: recommendationPayload.workingCapitalDebt,
+        recommendations: recommendationPayload.recommendations,
+      };
+      const financialDataWithInsights = {
+        ...financialData,
+        insightsVersion: BUSINESS_INSIGHTS_VERSION,
+        insights,
+      };
       const result = {
         companyDetails: {
           ...companyDetails,
@@ -2577,10 +3727,14 @@ export function registerRoutes(server: Server, app: Express): void {
           aiKeyProducts: descriptionPayload.keyProducts,
           aiDescriptionVersion: descriptionPayload.version,
         },
-        financialData,
+        financialData: financialDataWithInsights,
+        insights,
+        documentSource,
       };
 
-      await storage.setCachedCompanyFullData(normalizedCompanyId, finalTaxCode, result);
+      if (documentSource === "openapi") {
+        await storage.setCachedCompanyFullData(normalizedCompanyId, finalTaxCode, result);
+      }
       await createAnalysisHistoryEntry({
         userId,
         mode: "business",
