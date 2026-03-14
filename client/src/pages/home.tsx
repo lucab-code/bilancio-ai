@@ -452,7 +452,7 @@ export default function HomePage() {
       </section>
 
       <section className="stripe-shell px-6 py-6">
-        <div className="stripe-panel-soft mx-auto max-w-5xl px-6 py-8 sm:px-8">
+        <div className="stripe-panel stripe-subtle-grid mx-auto max-w-5xl px-6 py-8 sm:px-8">
           <div className="mb-6 flex items-end justify-between gap-3">
             <div>
               <div className="mb-2 stripe-kicker">
