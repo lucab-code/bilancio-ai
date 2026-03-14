@@ -162,6 +162,30 @@ interface SummaryStatItem {
   hint?: string;
 }
 
+interface CeoPriorityItem {
+  title: string;
+  action: string;
+  whyItMatters: string;
+  evidence: string;
+  impactArea: "cash" | "margin" | "risk" | "growth";
+  urgency: "30d" | "90d" | "180d";
+}
+
+interface CeoBriefData {
+  status: "strong" | "watch" | "critical";
+  headline: string;
+  verdict: string;
+  watchouts: string[];
+  topPriorities: CeoPriorityItem[];
+}
+
+interface KeyProductItem {
+  name: string;
+  tagline: string | null;
+  imageUrl: string | null;
+  pageUrl: string | null;
+}
+
 function formatMarginLabel(marginPct?: number | null): string {
   if (typeof marginPct !== "number" || !Number.isFinite(marginPct)) return "N/D";
   return `${marginPct.toFixed(1)}%`;
@@ -222,6 +246,124 @@ function formatSummaryStatValue(value: number | null, kind: "percent" | "days" |
   return `${value.toFixed(1)}%`;
 }
 
+function calculateSafePercentage(value: unknown, base: unknown): number | null {
+  if (!isFiniteNumeric(value) || !isFiniteNumeric(base) || base === 0) return null;
+  return (value / base) * 100;
+}
+
+function calculatePerEmployeeValue(value: unknown, employees: unknown): number | null {
+  if (!isFiniteNumeric(value) || !isFiniteNumeric(employees) || employees <= 0) return null;
+  return value / employees;
+}
+
+function buildLocalBusinessCeoBriefFromBilanci(bilanci: Record<string, any>): CeoBriefData | null {
+  const years = Object.keys(bilanci || {})
+    .filter((year) => {
+      const row = bilanci?.[year];
+      return row && typeof row === "object" && row.status !== "missing";
+    })
+    .sort((a, b) => b.localeCompare(a));
+
+  if (years.length === 0) return null;
+
+  const latestYear = years[0];
+  const previousYear = years[1] || null;
+  const latest = bilanci[latestYear] || {};
+  const previous = previousYear ? bilanci[previousYear] || {} : null;
+
+  const revenueGrowth = previous
+    ? calculateSafePercentage((latest?.fatturato ?? 0) - (previous?.fatturato ?? 0), previous?.fatturato)
+    : null;
+  const ebitdaMargin = calculateSafePercentage(latest?.ebitda, latest?.fatturato);
+  const cashConversion = latest?.cash_conversion ?? calculateSafePercentage(latest?.unlevered_free_cash_flow, latest?.ebitda);
+  const personnelCostPctRevenue = calculateSafePercentage(latest?.costo_personale, latest?.fatturato);
+  const revenuePerEmployee = calculatePerEmployeeValue(latest?.fatturato, latest?.dipendenti);
+  const taxesPctEbitda = calculateSafePercentage(latest?.taxes, latest?.ebitda);
+  const capexPctRevenue = calculateSafePercentage(latest?.capex, latest?.fatturato);
+  const changeNwcPctRevenue = calculateSafePercentage(latest?.change_nwc, latest?.fatturato);
+
+  let pressureScore = 0;
+  if (isFiniteNumeric(revenueGrowth) && revenueGrowth < 0) pressureScore += 2;
+  else if (isFiniteNumeric(revenueGrowth) && revenueGrowth < 5) pressureScore += 1;
+  if (isFiniteNumeric(ebitdaMargin) && ebitdaMargin < 8) pressureScore += 2;
+  else if (isFiniteNumeric(ebitdaMargin) && ebitdaMargin < 12) pressureScore += 1;
+  if (isFiniteNumeric(cashConversion) && cashConversion < 40) pressureScore += 2;
+  else if (isFiniteNumeric(cashConversion) && cashConversion < 60) pressureScore += 1;
+
+  const status: CeoBriefData["status"] = pressureScore >= 4 ? "critical" : pressureScore >= 2 ? "watch" : "strong";
+  const headline =
+    status === "critical"
+      ? "La cassa non e' abbastanza protetta: crescita, margine e conversione vanno riallineati."
+      : status === "watch"
+        ? "Il business va guidato piu' duramente su crescita, EBITDA margin e cash conversion."
+        : "Il business tiene, ma la cassa si difende solo con disciplina sulle tre leve chiave.";
+  const verdict = `Nel ${latestYear} la lettura corretta e': crescita ${isFiniteNumeric(revenueGrowth) ? `${revenueGrowth.toFixed(1)}%` : "N/D"}, EBITDA margin ${isFiniteNumeric(ebitdaMargin) ? `${ebitdaMargin.toFixed(1)}%` : "N/D"}, cash conversion ${isFiniteNumeric(cashConversion) ? `${cashConversion.toFixed(1)}%` : "N/D"}.`;
+
+  const cashLeakLabel =
+    isFiniteNumeric(changeNwcPctRevenue) && changeNwcPctRevenue > Math.max(capexPctRevenue ?? 0, taxesPctEbitda ?? 0)
+      ? "circolante"
+      : isFiniteNumeric(capexPctRevenue) && capexPctRevenue > Math.max(changeNwcPctRevenue ?? 0, taxesPctEbitda ?? 0)
+        ? "capex"
+        : isFiniteNumeric(taxesPctEbitda) && taxesPctEbitda > 0
+          ? "imposte"
+          : "conversione operativa";
+
+  const growthPriority: CeoPriorityItem = {
+    title:
+      isFiniteNumeric(revenueGrowth) && revenueGrowth < 0
+        ? "Rimettere in moto una crescita che non distrugga cassa"
+        : "Accelerare la crescita dove prezzo e cassa reggono",
+    action: "Concentra lo sforzo commerciale su linee, clienti e canali che mantengono pricing, margine e assorbimento di circolante sotto controllo; evita volume che allarga solo il fabbisogno.",
+    whyItMatters: "La crescita conta solo se aumenta l'EBITDA e non consuma piu' cassa di quella che crea.",
+    evidence: `Ricavi ${latestYear}: ${isFiniteNumeric(latest?.fatturato) ? formatCurrency(latest.fatturato) : "N/D"}; crescita ricavi ${latestYear}: ${isFiniteNumeric(revenueGrowth) ? `${revenueGrowth.toFixed(1)}%` : "N/D"}.`,
+    impactArea: "growth",
+    urgency: isFiniteNumeric(revenueGrowth) && revenueGrowth < 0 ? "30d" : "90d",
+  };
+
+  const marginPriority: CeoPriorityItem = {
+    title: "Alzare l'EBITDA margin con pricing, produttivita' e cost base",
+    action: "Verifica se il margine va recuperato da repricing, mix migliore, taglio costi, redesign dell'organizzazione, AI, outsourcing o riduzione selettiva dell'organico dove la produttivita' e' debole.",
+    whyItMatters: "Se il margine resta troppo basso, ogni euro di ricavo aggiuntivo genera poco valore e poca autofinanziabilita'.",
+    evidence: `EBITDA margin ${latestYear}: ${isFiniteNumeric(ebitdaMargin) ? `${ebitdaMargin.toFixed(1)}%` : "N/D"}; costo personale / ricavi ${latestYear}: ${isFiniteNumeric(personnelCostPctRevenue) ? `${personnelCostPctRevenue.toFixed(1)}%` : "N/D"}; ricavi per dipendente ${latestYear}: ${isFiniteNumeric(revenuePerEmployee) ? formatCurrency(revenuePerEmployee) : "N/D"}.`,
+    impactArea: "margin",
+    urgency:
+      (isFiniteNumeric(ebitdaMargin) && ebitdaMargin < 10) ||
+      (isFiniteNumeric(personnelCostPctRevenue) && personnelCostPctRevenue > 20)
+        ? "30d"
+        : "90d",
+  };
+
+  const cashPriority: CeoPriorityItem = {
+    title: "Chiudere la perdita di cassa nella cash conversion",
+    action:
+      cashLeakLabel === "circolante"
+        ? "Attacca subito crediti, scorte e termini fornitori con target di rilascio cassa e ownership operativa chiara."
+        : cashLeakLabel === "capex"
+          ? "Taglia o rinvia capex non essenziali e valuta modelli piu' asset-light o outsourcing dove il capitale investito rende poco."
+          : cashLeakLabel === "imposte"
+            ? "Apri una revisione fiscale con specialisti per capire se il tax cash-out e' ottimizzabile con incentivi, crediti o una struttura piu' efficiente."
+            : "Scomponi la cash conversion tra circolante, capex e imposte e assegna una leva concreta a ciascuna perdita di cassa.",
+    whyItMatters: "La cassa non si misura con l'EBITDA ma con quanto EBITDA riesci davvero a trasformare in UFCF.",
+    evidence: `Cash conversion ${latestYear}: ${isFiniteNumeric(cashConversion) ? `${cashConversion.toFixed(1)}%` : "N/D"}; NWC / ricavi ${latestYear}: ${isFiniteNumeric(latest?.nwc_pct_revenue) ? `${latest.nwc_pct_revenue.toFixed(1)}%` : "N/D"}; capex / ricavi ${latestYear}: ${isFiniteNumeric(capexPctRevenue) ? `${capexPctRevenue.toFixed(1)}%` : "N/D"}; taxes / EBITDA ${latestYear}: ${isFiniteNumeric(taxesPctEbitda) ? `${taxesPctEbitda.toFixed(1)}%` : "N/D"}.`,
+    impactArea: "cash",
+    urgency: isFiniteNumeric(cashConversion) && cashConversion < 60 ? "30d" : "90d",
+  };
+
+  const watchouts = [
+    `Growth ${latestYear}: ${isFiniteNumeric(revenueGrowth) ? `${revenueGrowth.toFixed(1)}%` : "N/D"}.`,
+    `EBITDA margin ${latestYear}: ${isFiniteNumeric(ebitdaMargin) ? `${ebitdaMargin.toFixed(1)}%` : "N/D"} con ricavi per dipendente ${isFiniteNumeric(revenuePerEmployee) ? formatCurrency(revenuePerEmployee) : "N/D"}.`,
+    `Cash conversion ${latestYear}: ${isFiniteNumeric(cashConversion) ? `${cashConversion.toFixed(1)}%` : "N/D"}; perdita principale su ${cashLeakLabel}.`,
+  ];
+
+  return {
+    status,
+    headline,
+    verdict,
+    watchouts,
+    topPriorities: [growthPriority, marginPriority, cashPriority],
+  };
+}
+
 function getBenchmarkStatusTone(status: string | undefined) {
   if (status === "above") {
     return {
@@ -245,6 +387,191 @@ function getBenchmarkStatusTone(status: string | undefined) {
     badge: "Parziale",
     className: "border-slate-200 bg-slate-50 text-slate-600",
   };
+}
+
+function getCeoBriefTone(status: string | undefined) {
+  if (status === "strong") {
+    return {
+      badge: "Solida",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      accentClassName: "from-emerald-500/10 via-emerald-500/5 to-transparent",
+    };
+  }
+  if (status === "critical") {
+    return {
+      badge: "Critica",
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+      accentClassName: "from-rose-500/10 via-rose-500/5 to-transparent",
+    };
+  }
+  return {
+    badge: "Da presidiare",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
+    accentClassName: "from-amber-500/10 via-amber-500/5 to-transparent",
+  };
+}
+
+function getImpactAreaTone(impactArea: string | undefined) {
+  if (impactArea === "cash") {
+    return {
+      label: "Cassa",
+      className: "border-sky-200 bg-sky-50 text-sky-700",
+    };
+  }
+  if (impactArea === "margin") {
+    return {
+      label: "Margine",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    };
+  }
+  if (impactArea === "risk") {
+    return {
+      label: "Rischio",
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+    };
+  }
+  return {
+    label: "Crescita",
+    className: "border-violet-200 bg-violet-50 text-violet-700",
+  };
+}
+
+function getUrgencyTone(urgency: string | undefined) {
+  if (urgency === "30d") {
+    return {
+      label: "30 giorni",
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+    };
+  }
+  if (urgency === "180d") {
+    return {
+      label: "180 giorni",
+      className: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+  }
+  return {
+    label: "90 giorni",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
+  };
+}
+
+function mapRecommendationThemeToImpactArea(theme: unknown): CeoPriorityItem["impactArea"] {
+  if (theme === "margini_pricing") return "margin";
+  if (theme === "capitale_circolante" || theme === "allocazione_capitale") return "cash";
+  if (theme === "debito_struttura") return "risk";
+  return "growth";
+}
+
+function mapRecommendationPriorityToUrgency(priority: unknown): CeoPriorityItem["urgency"] {
+  if (priority === "high") return "30d";
+  if (priority === "medium") return "90d";
+  return "180d";
+}
+
+function buildFallbackBusinessCeoBrief(recommendations: any[], workingCapitalDebt: any): CeoBriefData | null {
+  const normalizedRecommendations = Array.isArray(recommendations)
+    ? recommendations
+        .filter((item) => item && typeof item === "object")
+        .slice(0, 3)
+        .map((item, index) => ({
+          title: typeof item?.title === "string" && item.title.trim() ? item.title.trim() : `Priorita' ${index + 1}`,
+          action: typeof item?.description === "string" ? item.description.trim() : "",
+          whyItMatters: typeof item?.rationale === "string" ? item.rationale.trim() : "",
+          evidence: typeof item?.evidence === "string" ? item.evidence.trim() : "",
+          impactArea: mapRecommendationThemeToImpactArea(item?.theme),
+          urgency: mapRecommendationPriorityToUrgency(item?.priority),
+        }))
+    : [];
+
+  if (normalizedRecommendations.length === 0) return null;
+
+  const highPriorityCount = normalizedRecommendations.filter((item) => item.urgency === "30d").length;
+  const status: CeoBriefData["status"] = highPriorityCount >= 2 ? "critical" : highPriorityCount === 1 ? "watch" : "strong";
+  const headline =
+    status === "critical"
+      ? "Serve una correzione rapida: la priorita' e' recuperare controllo su cassa e execution."
+      : status === "watch"
+        ? "Il business regge, ma richiede priorita' nette su margine, cassa o rischio."
+        : "Il business appare ordinato, con alcune leve chiare per difendere il vantaggio.";
+  const verdictSource =
+    typeof workingCapitalDebt?.summary === "string" && workingCapitalDebt.summary.trim()
+      ? workingCapitalDebt.summary.trim()
+      : normalizedRecommendations[0]?.whyItMatters || "";
+  const watchouts = Array.isArray(workingCapitalDebt?.bullets) && workingCapitalDebt.bullets.length > 0
+    ? workingCapitalDebt.bullets.filter((item: unknown) => typeof item === "string" && item.trim()).slice(0, 3)
+    : normalizedRecommendations.map((item) => item.title).slice(0, 3);
+
+  return {
+    status,
+    headline,
+    verdict: verdictSource || "Le priorita' manageriali sono guidate dai numeri oggi disponibili.",
+    watchouts,
+    topPriorities: normalizedRecommendations,
+  };
+}
+
+function normalizeBusinessCeoBrief(raw: any, fallback: CeoBriefData | null): CeoBriefData | null {
+  if ((!raw || typeof raw !== "object") && !fallback) return null;
+
+  const source = raw && typeof raw === "object" ? raw : {};
+  const fallbackPriorities = fallback?.topPriorities || [];
+  const rawPriorities = Array.isArray(source.topPriorities) && source.topPriorities.length === 3
+    ? source.topPriorities
+    : fallbackPriorities;
+  const topPriorities = rawPriorities
+    .map((item: any, index: number) => ({
+      title: typeof item?.title === "string" && item.title.trim() ? item.title.trim() : fallbackPriorities[index]?.title || `Priorita' ${index + 1}`,
+      action: typeof item?.action === "string" && item.action.trim() ? item.action.trim() : fallbackPriorities[index]?.action || "",
+      whyItMatters:
+        typeof item?.whyItMatters === "string" && item.whyItMatters.trim()
+          ? item.whyItMatters.trim()
+          : fallbackPriorities[index]?.whyItMatters || "",
+      evidence: typeof item?.evidence === "string" && item.evidence.trim() ? item.evidence.trim() : fallbackPriorities[index]?.evidence || "",
+      impactArea:
+        item?.impactArea === "cash" || item?.impactArea === "margin" || item?.impactArea === "risk" || item?.impactArea === "growth"
+          ? item.impactArea
+          : fallbackPriorities[index]?.impactArea || "growth",
+      urgency:
+        item?.urgency === "30d" || item?.urgency === "90d" || item?.urgency === "180d"
+          ? item.urgency
+          : fallbackPriorities[index]?.urgency || "90d",
+    }))
+    .slice(0, 3);
+
+  if (topPriorities.length === 0) return fallback;
+
+  const fallbackStatus = fallback?.status || "watch";
+  return {
+    status:
+      source?.status === "strong" || source?.status === "watch" || source?.status === "critical"
+        ? source.status
+        : fallbackStatus,
+    headline:
+      typeof source?.headline === "string" && source.headline.trim()
+        ? source.headline.trim()
+        : fallback?.headline || topPriorities[0]?.title || "CEO Brief",
+    verdict:
+      typeof source?.verdict === "string" && source.verdict.trim()
+        ? source.verdict.trim()
+        : fallback?.verdict || "",
+    watchouts: Array.isArray(source?.watchouts) && source.watchouts.length > 0
+      ? source.watchouts.filter((item: unknown) => typeof item === "string" && item.trim()).slice(0, 3)
+      : fallback?.watchouts || [],
+    topPriorities,
+  };
+}
+
+function normalizeKeyProducts(products: unknown): KeyProductItem[] {
+  if (!Array.isArray(products)) return [];
+  return products
+    .filter((item) => item && typeof item === "object" && typeof (item as any).name === "string" && (item as any).name.trim())
+    .slice(0, 4)
+    .map((item: any) => ({
+      name: item.name.trim(),
+      tagline: typeof item?.tagline === "string" && item.tagline.trim() ? item.tagline.trim() : null,
+      imageUrl: typeof item?.imageUrl === "string" && item.imageUrl.trim() ? item.imageUrl.trim() : null,
+      pageUrl: typeof item?.pageUrl === "string" && item.pageUrl.trim() ? item.pageUrl.trim() : null,
+    }));
 }
 
 function mergeBilanciMaps(
@@ -377,6 +704,391 @@ function FinancialTableCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function BusinessCeoBriefCard({ ceoBrief }: { ceoBrief: CeoBriefData }) {
+  const tone = getCeoBriefTone(ceoBrief.status);
+
+  return (
+    <Card data-testid="section-ceo-brief" className="overflow-hidden border-border/70">
+      <CardHeader className={`relative gap-4 bg-gradient-to-br ${tone.accentClassName}`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${tone.className}`}>
+                {tone.badge}
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                <Lightbulb className="h-3.5 w-3.5" />
+                CEO Brief
+              </span>
+            </div>
+            <div>
+              <CardTitle className="text-2xl leading-tight text-foreground sm:text-3xl">
+                {ceoBrief.headline}
+              </CardTitle>
+              {ceoBrief.verdict && (
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/80">
+                  {ceoBrief.verdict}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6 pt-6">
+        {ceoBrief.watchouts.length > 0 && (
+          <div className="grid gap-3 sm:grid-cols-3">
+            {ceoBrief.watchouts.map((item, index) => (
+              <div
+                key={`${item}-${index}`}
+                className="rounded-2xl border border-border/60 bg-slate-50/70 px-4 py-4"
+              >
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Watchout {index + 1}
+                </div>
+                <p className="mt-2 text-sm leading-6 text-foreground/85">{item}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          {ceoBrief.topPriorities.map((priority, index) => {
+            const impactTone = getImpactAreaTone(priority.impactArea);
+            const urgencyTone = getUrgencyTone(priority.urgency);
+
+            return (
+              <div
+                key={`${priority.title}-${index}`}
+                className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                    {index + 1}
+                  </span>
+                  <span className={`rounded-full border px-3 py-1 text-[11px] font-medium ${impactTone.className}`}>
+                    {impactTone.label}
+                  </span>
+                  <span className={`rounded-full border px-3 py-1 text-[11px] font-medium ${urgencyTone.className}`}>
+                    {urgencyTone.label}
+                  </span>
+                </div>
+                <div className="mt-4 text-lg font-semibold leading-snug text-foreground">
+                  {priority.title}
+                </div>
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Cosa fare
+                    </div>
+                    <p className="mt-1 text-sm leading-6 text-foreground/85">{priority.action}</p>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Perche' conta
+                    </div>
+                    <p className="mt-1 text-sm leading-6 text-foreground/80">{priority.whyItMatters}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border/60 bg-slate-50/70 px-4 py-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Evidenza
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-foreground/80">{priority.evidence}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BusinessSnapshotCard({
+  descriptionText,
+  aiDescriptionSources,
+  keyProducts,
+}: {
+  descriptionText: string;
+  aiDescriptionSources: Array<{ title?: string; url: string }>;
+  keyProducts: KeyProductItem[];
+}) {
+  if (!descriptionText && keyProducts.length === 0) return null;
+
+  return (
+    <Card data-testid="section-business-snapshot">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Business Snapshot
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {descriptionText && (
+          <p className="whitespace-pre-line text-sm leading-7 text-foreground/90">
+            {descriptionText}
+          </p>
+        )}
+
+        {keyProducts.length > 0 && (
+          <div className="grid gap-3 md:grid-cols-2">
+            {keyProducts.map((item, index) => (
+              <div
+                key={`${item.name}-${index}`}
+                className="rounded-2xl border border-border/60 bg-slate-50/60 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Focus {index + 1}
+                    </div>
+                    <div className="mt-2 text-base font-semibold text-foreground">{item.name}</div>
+                    {item.tagline && (
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">{item.tagline}</p>
+                    )}
+                  </div>
+                  {item.pageUrl && (
+                    <a
+                      href={item.pageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 rounded-full border border-border/60 px-3 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                    >
+                      Fonte
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {aiDescriptionSources.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {aiDescriptionSources.map((source: any, index: number) => (
+              <a
+                key={`${source.url}-${index}`}
+                href={source.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+              >
+                {typeof source?.title === "string" && source.title.trim() ? source.title : `Fonte ${index + 1}`}
+              </a>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function LegacyAnalysisSections({ analysis, isPremium }: { analysis: any; isPremium: boolean }) {
+  if (!analysis || typeof analysis !== "object") return null;
+
+  return (
+    <>
+      {Array.isArray(analysis?.keyMetrics) && analysis.keyMetrics.length > 0 && (
+        <Card data-testid="section-key-metrics">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Indicatori Chiave
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {analysis.keyMetrics.map((metric: any, i: number) => (
+                <div key={i} className="rounded-lg border border-border/60 p-3">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{metric.label}</span>
+                    {metric.trend === "up" && <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />}
+                    {metric.trend === "down" && <TrendingDown className="h-3.5 w-3.5 text-red-500" />}
+                    {metric.trend === "stable" && <Minus className="h-3.5 w-3.5 text-muted-foreground" />}
+                  </div>
+                  <div className="text-lg font-bold">{metric.value}</div>
+                  {metric.description && (
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">{metric.description}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {analysis?.summary && (
+        <Card data-testid="section-ai-summary">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Sintesi Analisi AI
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">{analysis.summary}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {analysis?.incomeStatementAnalysis && (
+        <Card data-testid="section-income-statement">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Analisi Conto Economico
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">{analysis.incomeStatementAnalysis}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {analysis?.balanceSheetAnalysis && (
+        <Card data-testid="section-balance-sheet">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Analisi Stato Patrimoniale
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">{analysis.balanceSheetAnalysis}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {analysis?.cashFlowAnalysis && (
+        <Card data-testid="section-cash-flow-analysis">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Analisi Cash Flow
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">{analysis.cashFlowAnalysis}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {(analysis?.strengths?.length > 0 || analysis?.weaknesses?.length > 0 || analysis?.opportunities?.length > 0 || analysis?.threats?.length > 0) && (
+        <PremiumGate isUnlocked={isPremium} featureLabel="Analisi SWOT">
+          <Card data-testid="section-swot">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Analisi SWOT
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {analysis.strengths?.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-emerald-600">
+                      <ShieldCheck className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Punti di Forza</span>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {analysis.strengths.map((item: string, index: number) => (
+                        <li key={index} className="flex gap-2 text-sm text-foreground/90">
+                          <span className="mt-1 shrink-0 text-emerald-500">+</span>
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {analysis.weaknesses?.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-red-500">
+                      <AlertTriangle className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Punti di Debolezza</span>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {analysis.weaknesses.map((item: string, index: number) => (
+                        <li key={index} className="flex gap-2 text-sm text-foreground/90">
+                          <span className="mt-1 shrink-0 text-red-400">-</span>
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {analysis.opportunities?.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-blue-500">
+                      <Target className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Opportunita'</span>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {analysis.opportunities.map((item: string, index: number) => (
+                        <li key={index} className="flex gap-2 text-sm text-foreground/90">
+                          <span className="mt-1 shrink-0 text-blue-400">*</span>
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {analysis.threats?.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-amber-500">
+                      <AlertTriangle className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Minacce</span>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {analysis.threats.map((item: string, index: number) => (
+                        <li key={index} className="flex gap-2 text-sm text-foreground/90">
+                          <span className="mt-1 shrink-0 text-amber-400">!</span>
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </PremiumGate>
+      )}
+
+      {analysis?.recommendations?.length > 0 && (
+        <PremiumGate isUnlocked={isPremium} featureLabel="Raccomandazioni Strategiche">
+          <Card data-testid="section-recommendations">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Raccomandazioni Strategiche
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-3">
+                {analysis.recommendations.map((rec: string, index: number) => (
+                  <li key={index} className="flex gap-3 text-sm text-foreground/90">
+                    <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                      {index + 1}
+                    </div>
+                    {rec}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        </PremiumGate>
+      )}
+
+      {analysis?.marketComparison && (
+        <PremiumGate isUnlocked={isPremium} featureLabel="Confronto di Mercato">
+          <Card data-testid="section-market-comparison">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Confronto di Mercato
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">{analysis.marketComparison}</p>
+            </CardContent>
+          </Card>
+        </PremiumGate>
+      )}
+    </>
   );
 }
 
@@ -731,9 +1443,14 @@ export default function ResultsPage() {
   const purchasedBilanci = (financialData?.purchasedBilanci || {}) as Record<string, PurchasedBilancio>;
   const uploadedBilanci = (financialData?.userUploadedBilanci || {}) as Record<string, UploadedBilancioDocument>;
   const insights = data.insights || financialData?.insights || {};
+  const isBusinessMode = data.mode === "business";
   const marketBenchmarks = Array.isArray(insights?.marketBenchmarks?.metrics) ? insights.marketBenchmarks.metrics : [];
   const marketBenchmarkSources = Array.isArray(insights?.marketBenchmarks?.sources) ? insights.marketBenchmarks.sources : [];
-  const recommendations = Array.isArray(insights?.recommendations) ? insights.recommendations : [];
+  const insightRecommendations = Array.isArray(insights?.recommendations) ? insights.recommendations : [];
+  const workingCapitalDebt =
+    insights?.workingCapitalDebt && typeof insights.workingCapitalDebt === "object"
+      ? insights.workingCapitalDebt
+      : { summary: "", bullets: [] };
   const companyIdForFiles = companyDetails?.id || company?.id || "";
   const yearsWithData = isComparativeBusinessSource
     ? (Array.isArray(financialData?.coveredYears)
@@ -852,6 +1569,7 @@ export default function ResultsPage() {
   const aiDescriptionSources = Array.isArray(companyDetails?.aiDescriptionSources)
     ? companyDetails.aiDescriptionSources.filter((source: any) => typeof source?.url === "string" && source.url.trim())
     : [];
+  const aiKeyProducts = normalizeKeyProducts(companyDetails?.aiKeyProducts);
   let fallbackDescriptionText = "";
   if (company.denominazione) {
     fallbackDescriptionText = `${company.denominazione}`;
@@ -877,6 +1595,15 @@ export default function ResultsPage() {
   }
 
   const descriptionText = aiDescriptionText || fallbackDescriptionText;
+  const derivedBusinessCeoBrief = isBusinessMode
+    ? buildLocalBusinessCeoBriefFromBilanci(bilanci)
+    : null;
+  const fallbackBusinessCeoBrief = isBusinessMode
+    ? derivedBusinessCeoBrief || buildFallbackBusinessCeoBrief(insightRecommendations, workingCapitalDebt)
+    : null;
+  const businessCeoBrief = isBusinessMode
+    ? normalizeBusinessCeoBrief(insights?.ceoBrief, fallbackBusinessCeoBrief)
+    : null;
 
   const activeChartData = chartData || fallbackChartData;
   const financialTableYears = activeChartData?.years || [];
@@ -1051,6 +1778,19 @@ export default function ResultsPage() {
         },
       ]
     : [];
+  const hasLegacyAnalysisContent = Boolean(
+    data.analysis?.summary ||
+    data.analysis?.incomeStatementAnalysis ||
+    data.analysis?.balanceSheetAnalysis ||
+    data.analysis?.cashFlowAnalysis ||
+    data.analysis?.marketComparison ||
+    (Array.isArray(data.analysis?.keyMetrics) && data.analysis.keyMetrics.length > 0) ||
+    (Array.isArray(data.analysis?.strengths) && data.analysis.strengths.length > 0) ||
+    (Array.isArray(data.analysis?.weaknesses) && data.analysis.weaknesses.length > 0) ||
+    (Array.isArray(data.analysis?.opportunities) && data.analysis.opportunities.length > 0) ||
+    (Array.isArray(data.analysis?.threats) && data.analysis.threats.length > 0) ||
+    (Array.isArray(data.analysis?.recommendations) && data.analysis.recommendations.length > 0)
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -1073,6 +1813,10 @@ export default function ResultsPage() {
 
       {/* Content */}
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+        {isBusinessMode && businessCeoBrief && (
+          <BusinessCeoBriefCard ceoBrief={businessCeoBrief} />
+        )}
 
         {/* ANAGRAFICA */}
         <Card data-testid="section-anagrafica">
@@ -1153,8 +1897,13 @@ export default function ResultsPage() {
           </CardContent>
         </Card>
 
-        {/* DESCRIPTION */}
-        {descriptionText && (
+        {isBusinessMode ? (
+          <BusinessSnapshotCard
+            descriptionText={descriptionText}
+            aiDescriptionSources={aiDescriptionSources}
+            keyProducts={aiKeyProducts}
+          />
+        ) : descriptionText ? (
           <Card data-testid="section-descrizione">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1182,7 +1931,7 @@ export default function ResultsPage() {
               )}
             </CardContent>
           </Card>
-        )}
+        ) : null}
 
         {/* CHART */}
         {isLoadingEbitda && (
@@ -1261,7 +2010,7 @@ export default function ResultsPage() {
           </Card>
         )}
 
-        {data.mode === "business" && marketBenchmarks.length > 0 && (
+        {isBusinessMode && marketBenchmarks.length > 0 && (
           <Card data-testid="section-performance-vs-market">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1328,7 +2077,7 @@ export default function ResultsPage() {
           </Card>
         )}
 
-        {data.mode === "business" && hasWorkingCapitalTable && (
+        {isBusinessMode && hasWorkingCapitalTable && (
           <FinancialTableCard
             title="Capitale Circolante"
             note="(Dati in €m e giorni)"
@@ -1340,7 +2089,7 @@ export default function ResultsPage() {
           />
         )}
 
-        {data.mode === "business" && hasDebtTable && (
+        {isBusinessMode && hasDebtTable && (
           <FinancialTableCard
             title="Debito"
             note="(Dati in €m e x)"
@@ -1348,71 +2097,6 @@ export default function ResultsPage() {
             rows={debtTableRows}
             testId="section-debt"
           />
-        )}
-
-        {data.mode === "business" && recommendations.length > 0 && (
-          <Card data-testid="section-recommendations">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Recommendations
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {recommendations.map((item: any, index: number) => {
-                const priority = typeof item?.priority === "string" ? item.priority : "medium";
-                const tone = priority === "high"
-                  ? "border-amber-200 bg-amber-50 text-amber-700"
-                  : priority === "low"
-                    ? "border-slate-200 bg-slate-50 text-slate-600"
-                    : "border-sky-200 bg-sky-50 text-sky-700";
-
-                return (
-                  <div
-                    key={`${item?.title || "recommendation"}-${index}`}
-                    className="rounded-2xl border border-border/60 bg-card p-4"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-foreground">
-                          {item?.title || `Recommendation ${index + 1}`}
-                        </div>
-                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                          {item?.description}
-                        </p>
-                        {(typeof item?.rationale === "string" && item.rationale.trim()) || (typeof item?.evidence === "string" && item.evidence.trim()) ? (
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                            {typeof item?.rationale === "string" && item.rationale.trim() && (
-                              <div className="rounded-xl border border-border/50 bg-slate-50/70 px-3 py-2">
-                                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                  Perche' conta
-                                </div>
-                                <p className="mt-1 text-xs leading-5 text-foreground/80">
-                                  {item.rationale}
-                                </p>
-                              </div>
-                            )}
-                            {typeof item?.evidence === "string" && item.evidence.trim() && (
-                              <div className="rounded-xl border border-border/50 bg-slate-50/70 px-3 py-2">
-                                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                  Evidenza
-                                </div>
-                                <p className="mt-1 text-xs leading-5 text-foreground/80">
-                                  {item.evidence}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        ) : null}
-                      </div>
-                      <span className={`rounded-full border px-3 py-1 text-[11px] font-medium ${tone}`}>
-                        {priority === "high" ? "High" : priority === "low" ? "Low" : "Medium"}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
         )}
 
         {hasBilanciSection && (
@@ -1616,217 +2300,33 @@ export default function ResultsPage() {
             </CardContent>
           </Card>
         )}
-        {/* ── PREMIUM SECTIONS ── */}
-
-        {/* Key Metrics */}
-        {data.analysis?.keyMetrics && data.analysis.keyMetrics.length > 0 && (
-          <Card data-testid="section-key-metrics">
+        {isBusinessMode && hasLegacyAnalysisContent && (
+          <Card data-testid="section-technical-appendix">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Indicatori Chiave
+                Appendice Tecnica
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {data.analysis.keyMetrics.map((metric: any, i: number) => (
-                  <div key={i} className="rounded-lg border border-border/60 p-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{metric.label}</span>
-                      {metric.trend === "up" && <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />}
-                      {metric.trend === "down" && <TrendingDown className="w-3.5 h-3.5 text-red-500" />}
-                      {metric.trend === "stable" && <Minus className="w-3.5 h-3.5 text-muted-foreground" />}
-                    </div>
-                    <div className="text-lg font-bold">{metric.value}</div>
-                    {metric.description && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{metric.description}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="legacy-analysis" className="border-b-0">
+                  <AccordionTrigger className="py-1 text-left text-sm font-medium text-foreground">
+                    Apri dettaglio analitico legacy
+                  </AccordionTrigger>
+                  <AccordionContent className="space-y-6 pt-4">
+                    <LegacyAnalysisSections analysis={data.analysis} isPremium={isPremium} />
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             </CardContent>
           </Card>
         )}
 
-        {/* AI Analysis Summary */}
-        {data.analysis?.summary && (
-          <Card data-testid="section-ai-summary">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Sintesi Analisi AI
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="whitespace-pre-line text-sm text-foreground/90 leading-relaxed">{data.analysis.summary}</p>
-            </CardContent>
-          </Card>
+        {!isBusinessMode && (
+          <LegacyAnalysisSections analysis={data.analysis} isPremium={isPremium} />
         )}
 
-        {/* Income Statement Analysis */}
-        {data.analysis?.incomeStatementAnalysis && (
-          <Card data-testid="section-income-statement">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Analisi Conto Economico
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="whitespace-pre-line text-sm text-foreground/90 leading-relaxed">{data.analysis.incomeStatementAnalysis}</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Balance Sheet Analysis */}
-        {data.analysis?.balanceSheetAnalysis && (
-          <Card data-testid="section-balance-sheet">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Analisi Stato Patrimoniale
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="whitespace-pre-line text-sm text-foreground/90 leading-relaxed">{data.analysis.balanceSheetAnalysis}</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Cash Flow Analysis */}
-        {data.analysis?.cashFlowAnalysis && (
-          <Card data-testid="section-cash-flow-analysis">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Analisi Cash Flow
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="whitespace-pre-line text-sm text-foreground/90 leading-relaxed">{data.analysis.cashFlowAnalysis}</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* SWOT Analysis — PREMIUM */}
-        {data.analysis && (data.analysis.strengths?.length > 0 || data.analysis.weaknesses?.length > 0 || data.analysis.opportunities?.length > 0 || data.analysis.threats?.length > 0) && (
-          <PremiumGate isUnlocked={isPremium} featureLabel="Analisi SWOT">
-            <Card data-testid="section-swot">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Analisi SWOT
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {data.analysis.strengths?.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-emerald-600">
-                        <ShieldCheck className="w-4 h-4" />
-                        <span className="text-xs font-semibold uppercase">Punti di Forza</span>
-                      </div>
-                      <ul className="space-y-1.5">
-                        {data.analysis.strengths.map((s: string, i: number) => (
-                          <li key={i} className="text-sm text-foreground/90 flex gap-2">
-                            <span className="text-emerald-500 mt-1 shrink-0">+</span>
-                            {s}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {data.analysis.weaknesses?.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-red-500">
-                        <AlertTriangle className="w-4 h-4" />
-                        <span className="text-xs font-semibold uppercase">Punti di Debolezza</span>
-                      </div>
-                      <ul className="space-y-1.5">
-                        {data.analysis.weaknesses.map((w: string, i: number) => (
-                          <li key={i} className="text-sm text-foreground/90 flex gap-2">
-                            <span className="text-red-400 mt-1 shrink-0">-</span>
-                            {w}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {data.analysis.opportunities?.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-blue-500">
-                        <Target className="w-4 h-4" />
-                        <span className="text-xs font-semibold uppercase">Opportunità</span>
-                      </div>
-                      <ul className="space-y-1.5">
-                        {data.analysis.opportunities.map((o: string, i: number) => (
-                          <li key={i} className="text-sm text-foreground/90 flex gap-2">
-                            <span className="text-blue-400 mt-1 shrink-0">*</span>
-                            {o}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {data.analysis.threats?.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-amber-500">
-                        <AlertTriangle className="w-4 h-4" />
-                        <span className="text-xs font-semibold uppercase">Minacce</span>
-                      </div>
-                      <ul className="space-y-1.5">
-                        {data.analysis.threats.map((t: string, i: number) => (
-                          <li key={i} className="text-sm text-foreground/90 flex gap-2">
-                            <span className="text-amber-400 mt-1 shrink-0">!</span>
-                            {t}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </PremiumGate>
-        )}
-
-        {/* Recommendations — PREMIUM */}
-        {data.analysis?.recommendations?.length > 0 && (
-          <PremiumGate isUnlocked={isPremium} featureLabel="Raccomandazioni Strategiche">
-            <Card data-testid="section-recommendations">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Raccomandazioni Strategiche
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ul className="space-y-3">
-                  {data.analysis.recommendations.map((rec: string, i: number) => (
-                    <li key={i} className="flex gap-3 text-sm text-foreground/90">
-                      <div className="shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold mt-0.5">
-                        {i + 1}
-                      </div>
-                      {rec}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          </PremiumGate>
-        )}
-
-        {/* Market Comparison — PREMIUM */}
-        {data.analysis?.marketComparison && (
-          <PremiumGate isUnlocked={isPremium} featureLabel="Confronto di Mercato">
-            <Card data-testid="section-market-comparison">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Confronto di Mercato
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="whitespace-pre-line text-sm text-foreground/90 leading-relaxed">{data.analysis.marketComparison}</p>
-              </CardContent>
-            </Card>
-          </PremiumGate>
-        )}
-
-        {/* Competitors — PREMIUM */}
-        {data.competitors?.competitors?.length > 0 && (
+        {!isBusinessMode && data.competitors?.competitors?.length > 0 && (
           <PremiumGate isUnlocked={isPremium} featureLabel="Analisi Competitor">
             <Card data-testid="section-competitors">
               <CardHeader className="pb-2">

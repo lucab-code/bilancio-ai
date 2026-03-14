@@ -89,7 +89,7 @@ const DOCUENGINE_DOCUMENT_IDS = {
 const BILANCIO_OTTICO_COMPARATIVE_SOURCE = "bilancio-ottico-comparative-4y-v1";
 const BILANCIO_OTTICO_PDF_SOURCE = "bilancio-ottico-pdf-v1";
 const COMPANY_DESCRIPTION_WEB_VERSION = "web-v4";
-const BUSINESS_INSIGHTS_VERSION = "insights-v3";
+const BUSINESS_INSIGHTS_VERSION = "insights-v4";
 let stripeClient: Stripe | null = null;
 
 function getLatestPurchasedBilancio(purchasedBilanci: Record<string, any> | undefined) {
@@ -579,6 +579,49 @@ const WORKING_CAPITAL_RECOMMENDATIONS_SCHEMA = {
     },
   },
   required: ["workingCapitalDebt", "recommendations"],
+} as const;
+
+const CEO_BRIEF_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    status: {
+      type: "string",
+      enum: ["strong", "watch", "critical"],
+    },
+    headline: { type: "string" },
+    verdict: { type: "string" },
+    watchouts: {
+      type: "array",
+      maxItems: 3,
+      items: { type: "string" },
+    },
+    topPriorities: {
+      type: "array",
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          action: { type: "string" },
+          whyItMatters: { type: "string" },
+          evidence: { type: "string" },
+          impactArea: {
+            type: "string",
+            enum: ["cash", "margin", "risk", "growth"],
+          },
+          urgency: {
+            type: "string",
+            enum: ["30d", "90d", "180d"],
+          },
+        },
+        required: ["title", "action", "whyItMatters", "evidence", "impactArea", "urgency"],
+      },
+    },
+  },
+  required: ["status", "headline", "verdict", "watchouts", "topPriorities"],
 } as const;
 
 const COMPANY_DESCRIPTION_SCHEMA = {
@@ -2061,11 +2104,156 @@ function getLatestFinancialSnapshot(financialData: any) {
   };
 }
 
+function mapRecommendationThemeToImpactArea(theme: unknown): "cash" | "margin" | "risk" | "growth" {
+  if (theme === "margini_pricing") return "margin";
+  if (theme === "capitale_circolante" || theme === "allocazione_capitale") return "cash";
+  if (theme === "debito_struttura") return "risk";
+  return "growth";
+}
+
+function mapRecommendationPriorityToUrgency(priority: unknown): "30d" | "90d" | "180d" {
+  if (priority === "high") return "30d";
+  if (priority === "medium") return "90d";
+  return "180d";
+}
+
+function calculatePerEmployeeMetric(value: unknown, employees: unknown): number | null {
+  if (!isFiniteNumber(value) || !isFiniteNumber(employees) || employees <= 0) return null;
+  return Number((value / employees).toFixed(0));
+}
+
+function getPrimaryCashLeak(latest: any) {
+  const candidates = [
+    {
+      key: "working_capital",
+      label: "capitale circolante",
+      value: isFiniteNumber(latest?.change_nwc) && latest.change_nwc > 0 ? latest.change_nwc : 0,
+    },
+    {
+      key: "capex",
+      label: "capex",
+      value: isFiniteNumber(latest?.capex) && latest.capex > 0 ? latest.capex : 0,
+    },
+    {
+      key: "taxes",
+      label: "imposte",
+      value: isFiniteNumber(latest?.taxes) && latest.taxes > 0 ? latest.taxes : 0,
+    },
+  ].sort((a, b) => b.value - a.value);
+
+  return candidates[0]?.value > 0 ? candidates[0] : null;
+}
+
+function inferFallbackCeoStatus(snapshot: ReturnType<typeof getLatestFinancialSnapshot>): "strong" | "watch" | "critical" {
+  let pressureScore = 0;
+
+  if (isFiniteNumber(snapshot.metrics.ebitdaMargin)) {
+    if (snapshot.metrics.ebitdaMargin < 5) pressureScore += 2;
+    else if (snapshot.metrics.ebitdaMargin < 10) pressureScore += 1;
+  }
+
+  if (isFiniteNumber(snapshot.metrics.cashConversion)) {
+    if (snapshot.metrics.cashConversion < 40) pressureScore += 2;
+    else if (snapshot.metrics.cashConversion < 60) pressureScore += 1;
+  }
+
+  if (isFiniteNumber(snapshot.metrics.netDebtEbitda)) {
+    if (snapshot.metrics.netDebtEbitda > 4) pressureScore += 2;
+    else if (snapshot.metrics.netDebtEbitda > 3) pressureScore += 1;
+  }
+
+  if (isFiniteNumber(snapshot.metrics.nwcPctRevenue) && snapshot.metrics.nwcPctRevenue > 25) {
+    pressureScore += 1;
+  }
+
+  if (isFiniteNumber(snapshot.metrics.revenueGrowth) && snapshot.metrics.revenueGrowth < 0) {
+    pressureScore += 1;
+  }
+
+  if (pressureScore >= 4) return "critical";
+  if (pressureScore >= 2) return "watch";
+  return "strong";
+}
+
+function buildFallbackCeoBrief(
+  financialData: any,
+  workingCapitalDebt: { summary: string; bullets: string[] },
+  recommendations: Array<{
+    theme?: string;
+    title: string;
+    description: string;
+    rationale: string;
+    evidence: string;
+    priority: "high" | "medium" | "low";
+  }>,
+) {
+  const snapshot = getLatestFinancialSnapshot(financialData);
+  const latestYear = snapshot.latestYear || "ultimo anno disponibile";
+  const status = inferFallbackCeoStatus(snapshot);
+  const metricSignals: string[] = [];
+
+  if (isFiniteNumber(snapshot.metrics.ebitdaMargin)) {
+    metricSignals.push(`EBITDA margin ${latestYear} ${snapshot.metrics.ebitdaMargin.toFixed(1)}%`);
+  }
+  if (isFiniteNumber(snapshot.metrics.cashConversion)) {
+    metricSignals.push(`cash conversion ${latestYear} ${snapshot.metrics.cashConversion.toFixed(1)}%`);
+  }
+  if (isFiniteNumber(snapshot.metrics.netDebtEbitda)) {
+    metricSignals.push(`debito netto / EBITDA ${latestYear} ${snapshot.metrics.netDebtEbitda.toFixed(1)}x`);
+  }
+  if (isFiniteNumber(snapshot.metrics.revenueGrowth)) {
+    metricSignals.push(`crescita ricavi ${latestYear} ${snapshot.metrics.revenueGrowth.toFixed(1)}%`);
+  }
+
+  const metricSummary = metricSignals.length > 0
+    ? metricSignals.slice(0, 3).join(", ")
+    : `i dati ${latestYear} sono parziali ma sufficienti per isolare le priorita' operative`;
+
+  const headline =
+    status === "critical"
+      ? "Business sotto pressione: serve una correzione rapida su cassa e struttura."
+      : status === "watch"
+        ? "Business da presidiare: la crescita va difesa liberando cassa e margine."
+        : "Business complessivamente solido, con priorita' chiare per proteggere il vantaggio.";
+
+  const verdict =
+    status === "critical"
+      ? `Nel ${latestYear} il punto non e' inseguire nuova crescita, ma riprendere controllo su marginalita', cassa e leva. ${metricSummary}.`
+      : status === "watch"
+        ? `Nel ${latestYear} il business mostra basi utilizzabili, ma non abbastanza robuste da lasciare la gestione in automatico. ${metricSummary}.`
+        : `Nel ${latestYear} l'azienda mostra fondamentali complessivamente tenibili; il valore si difende mantenendo disciplina su allocazione del capitale e qualita' della crescita. ${metricSummary}.`;
+
+  const watchouts = Array.isArray(workingCapitalDebt?.bullets) && workingCapitalDebt.bullets.length > 0
+    ? workingCapitalDebt.bullets.slice(0, 3)
+    : recommendations.slice(0, 3).map((item) => item.title);
+
+  return {
+    status,
+    headline,
+    verdict,
+    watchouts,
+    topPriorities: recommendations.slice(0, 3).map((item) => ({
+      title: item.title,
+      action: item.description,
+      whyItMatters: item.rationale,
+      evidence: item.evidence,
+      impactArea: mapRecommendationThemeToImpactArea(item.theme),
+      urgency: mapRecommendationPriorityToUrgency(item.priority),
+    })),
+  };
+}
+
 function buildFallbackInsights(financialData: any) {
   const snapshot = getLatestFinancialSnapshot(financialData);
   const latest = snapshot.latest;
   const latestYear = snapshot.latestYear || "ultimo anno disponibile";
   const bullets: string[] = [];
+  const revenuePerEmployee = calculatePerEmployeeMetric(latest?.fatturato, latest?.dipendenti);
+  const personnelCostPctRevenue = calculatePercentage(latest?.costo_personale, latest?.fatturato);
+  const taxesPctEbitda = calculatePercentage(latest?.taxes, latest?.ebitda);
+  const capexPctRevenue = calculatePercentage(latest?.capex, latest?.fatturato);
+  const changeNwcPctRevenue = calculatePercentage(latest?.change_nwc, latest?.fatturato);
+  const primaryCashLeak = getPrimaryCashLeak(latest);
   const recommendations: Array<{
     theme: "margini_pricing" | "capitale_circolante" | "debito_struttura" | "allocazione_capitale" | "crescita_posizionamento";
     title: string;
@@ -2101,64 +2289,97 @@ function buildFallbackInsights(financialData: any) {
         : "La conversione dell'EBITDA in cassa e' soddisfacente.",
     );
   }
+  if (primaryCashLeak?.key === "working_capital") {
+    bullets.push("La cassa si disperde soprattutto nel capitale circolante, non nella redditivita' contabile.");
+  }
+  if (primaryCashLeak?.key === "capex") {
+    bullets.push("L'assorbimento di cassa e' guidato soprattutto dal livello di capex.");
+  }
+  if (primaryCashLeak?.key === "taxes") {
+    bullets.push("Il carico fiscale assorbe una parte materiale della cassa operativa.");
+  }
 
-  if (isFiniteNumber(snapshot.metrics.ebitdaMargin) && snapshot.metrics.ebitdaMargin < 10) {
-    recommendations.push({
-      theme: "margini_pricing",
-      title: "Recuperare disciplina sul margine lordo-operativo",
-      description: "Rivedi pricing, mix prodotto e costi di struttura per rialzare il margine operativo prima di inseguire ulteriore crescita commerciale.",
-      rationale: "Con un margine operativo compresso, ogni euro di ricavo aggiuntivo rischia di generare poco valore e poca capacita' di autofinanziamento.",
-      evidence: `EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
-      priority: "high",
-    });
-  }
-  if (isFiniteNumber(latest?.nwc_pct_revenue) && latest.nwc_pct_revenue > 20) {
-    recommendations.push({
-      theme: "capitale_circolante",
-      title: "Ridurre l'assorbimento di capitale circolante",
-      description: "Imposta un piano operativo su incassi, scorte e termini fornitori con target puntuali di rilascio cassa nei prossimi 90-120 giorni.",
-      rationale: "Il capitale circolante sta assorbendo troppa cassa rispetto ai ricavi e limita la flessibilita' finanziaria dell'azienda.",
-      evidence: `Capitale circolante / ricavi ${latestYear}: ${isFiniteNumber(latest.nwc_pct_revenue) ? latest.nwc_pct_revenue.toFixed(1) : "N/D"}%.`,
-      priority: "high",
-    });
-  }
-  if (isFiniteNumber(latest?.net_debt_ebitda) && latest.net_debt_ebitda > 3) {
-    recommendations.push({
-      theme: "debito_struttura",
-      title: "Rimettere sotto controllo la leva",
-      description: "Rivedi profilo di rimborso, costo e struttura del debito prima di finanziare nuova crescita o nuovi investimenti.",
-      rationale: "Con leva elevata, la capacita' di assorbire volatilita' operativa si restringe e aumenta la sensibilita' verso banche e covenant impliciti.",
-      evidence: `Debito netto / EBITDA ${latestYear}: ${isFiniteNumber(latest.net_debt_ebitda) ? latest.net_debt_ebitda.toFixed(1) : "N/D"}x.`,
-      priority: "medium",
-    });
-  }
-  if (isFiniteNumber(snapshot.metrics.cashConversion) && snapshot.metrics.cashConversion < 60) {
-    recommendations.push({
-      theme: "allocazione_capitale",
-      title: "Riallineare EBITDA e generazione di cassa",
-      description: "Blocca capex non prioritario e imposta una soglia minima di ritorno di cassa per ogni iniziativa operativa o commerciale.",
-      rationale: "Se l'EBITDA non si trasforma in cassa, l'azienda cresce sulla carta ma non aumenta il proprio margine di manovra reale.",
-      evidence: `Cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%.`,
-      priority: "high",
-    });
-  }
   if (isFiniteNumber(snapshot.metrics.revenueGrowth) || isFiniteNumber(snapshot.metrics.ebitdaMargin)) {
     recommendations.push({
       theme: "crescita_posizionamento",
-      title: "Separare crescita da crescita redditizia",
-      description: "Valuta linee prodotto, clienti e canali che assorbono capitale o comprimono il margine, e rialloca le risorse verso la parte del business che genera ritorni migliori.",
-      rationale: "La crescita crea valore solo se conserva marginalita' e non peggiora il profilo di cassa o di rischio finanziario.",
+      title: "Riattivare crescita che generi cassa, non solo volume",
+      description: "Decidi dove cercare crescita nei prossimi 2-3 trimestri privilegiando linee, clienti e canali che difendono margine ed evitano nuovo assorbimento di circolante.",
+      rationale: "La crescita conta solo se alza la base di EBITDA e non peggiora la conversione in cassa; altrimenti aumenta il fabbisogno senza aumentare il valore.",
       evidence: `Crescita ricavi ${latestYear}: ${isFiniteNumber(snapshot.metrics.revenueGrowth) ? snapshot.metrics.revenueGrowth.toFixed(1) : "N/D"}%; EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
+      priority: isFiniteNumber(snapshot.metrics.revenueGrowth) && snapshot.metrics.revenueGrowth < 5 ? "high" : "medium",
+    });
+  }
+
+  if (
+    isFiniteNumber(snapshot.metrics.ebitdaMargin) ||
+    isFiniteNumber(personnelCostPctRevenue) ||
+    isFiniteNumber(revenuePerEmployee)
+  ) {
+    recommendations.push({
+      theme: "margini_pricing",
+      title: "Alzare EBITDA margin intervenendo su pricing, cost base e produttivita'",
+      description: "Valuta se il margine va recuperato da repricing, mix migliore, riduzione dei costi fissi o ripensamento dell'organico; se i ricavi per dipendente sono deboli, considera automazione, AI, outsourcing e, se necessario, ridimensionamento selettivo.",
+      rationale: "Il margine operativo e' la prima leva della generazione di cassa: se resta compresso, la crescita da sola non basta e il business assorbe risorse invece di liberarle.",
+      evidence: `EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%; costo del personale / ricavi ${latestYear}: ${isFiniteNumber(personnelCostPctRevenue) ? personnelCostPctRevenue.toFixed(1) : "N/D"}%; ricavi per dipendente ${latestYear}: ${isFiniteNumber(revenuePerEmployee) ? (revenuePerEmployee / 1_000).toFixed(0) : "N/D"}k.`,
+      priority:
+        (isFiniteNumber(snapshot.metrics.ebitdaMargin) && snapshot.metrics.ebitdaMargin < 10) ||
+        (isFiniteNumber(personnelCostPctRevenue) && personnelCostPctRevenue > 20)
+          ? "high"
+          : "medium",
+    });
+  }
+
+  if (
+    isFiniteNumber(snapshot.metrics.cashConversion) ||
+    isFiniteNumber(latest?.nwc_pct_revenue) ||
+    isFiniteNumber(latest?.capex) ||
+    isFiniteNumber(latest?.taxes)
+  ) {
+    recommendations.push({
+      theme: "capitale_circolante",
+      title: "Chiudere le perdite di cash conversion dove la cassa si disperde davvero",
+      description:
+        primaryCashLeak?.key === "working_capital"
+          ? "Attacca subito crediti, scorte e termini fornitori con target di rilascio cassa, invece di trattare il circolante come effetto collaterale della crescita."
+          : primaryCashLeak?.key === "capex"
+            ? "Riduci o rinvia capex non essenziali e valuta alternative piu' asset-light, incluse esternalizzazioni dove il ritorno del capitale investito non e' chiaro."
+            : primaryCashLeak?.key === "taxes"
+              ? "Apri una revisione strutturata della fiscalita' con advisor dedicato per capire se il tax cash-out e' ottimizzabile tramite incentivi, crediti o migliore struttura."
+              : "Scomponi la cash conversion in circolante, capex e imposte e assegna ownership esplicita a ogni perdita di cassa.",
+      rationale: "La cash conversion decide quanta cassa resta davvero dopo EBITDA; se e' debole, il problema non e' solo crescere o fare margine ma evitare dispersioni operative e finanziarie.",
+      evidence: `Cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%; change NWC / ricavi ${latestYear}: ${isFiniteNumber(changeNwcPctRevenue) ? changeNwcPctRevenue.toFixed(1) : "N/D"}%; capex / ricavi ${latestYear}: ${isFiniteNumber(capexPctRevenue) ? capexPctRevenue.toFixed(1) : "N/D"}%; taxes / EBITDA ${latestYear}: ${isFiniteNumber(taxesPctEbitda) ? taxesPctEbitda.toFixed(1) : "N/D"}%.`,
+      priority: isFiniteNumber(snapshot.metrics.cashConversion) && snapshot.metrics.cashConversion < 60 ? "high" : "medium",
+    });
+  }
+
+  if (isFiniteNumber(snapshot.metrics.cashConversion) && snapshot.metrics.cashConversion < 60) {
+    recommendations.push({
+      theme: "allocazione_capitale",
+      title: "Imporre disciplina di allocazione del capitale",
+      description: "Ogni euro di capex o di crescita commerciale deve superare una soglia esplicita di ritorno in cassa; dove non succede, valuta modelli piu' leggeri, outsourcing o stop agli investimenti non essenziali.",
+      rationale: "Quando la conversione in cassa e' debole, la priorita' non e' espandere il perimetro ma alzare il rendimento del capitale gia' impiegato.",
+      evidence: `UFCF ${latestYear}: ${isFiniteNumber(latest?.unlevered_free_cash_flow) ? (latest.unlevered_free_cash_flow / 1_000_000).toFixed(1) : "N/D"}m; capex / ricavi ${latestYear}: ${isFiniteNumber(capexPctRevenue) ? capexPctRevenue.toFixed(1) : "N/D"}%; cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%.`,
+      priority: "high",
+    });
+  }
+
+  if (isFiniteNumber(latest?.net_debt_ebitda) && latest.net_debt_ebitda > 3) {
+    recommendations.push({
+      theme: "debito_struttura",
+      title: "Evitare che la leva amplifichi un problema operativo di cassa",
+      description: "Se la leva e' gia' tesa, riduci il rischio prima che la combinazione di bassa cash conversion e debito limiti crescita, covenant capacity e negoziazione con le banche.",
+      rationale: "Il debito non crea il problema, ma puo' renderlo piu' urgente quando crescita, margine o cash conversion non sono abbastanza robusti.",
+      evidence: `Debito netto / EBITDA ${latestYear}: ${isFiniteNumber(latest?.net_debt_ebitda) ? latest.net_debt_ebitda.toFixed(1) : "N/D"}x; cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%.`,
       priority: "medium",
     });
   }
   if (recommendations.length === 0) {
     recommendations.push({
-      theme: "margini_pricing",
-      title: "Proteggere qualita' della crescita",
-      description: "Proteggi margini e conversione in cassa prima di accelerare su nuova crescita, evitando espansione che consumi capitale invece di generarlo.",
-      rationale: "Anche in assenza di segnali di stress evidenti, il valore si difende mantenendo allineati crescita, redditivita' e cassa.",
-      evidence: `Cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%; EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
+      theme: "crescita_posizionamento",
+      title: "Tenere allineate crescita, EBITDA margin e cash conversion",
+      description: "Gestisci il business con queste tre leve insieme: crescita selettiva, margine difeso e trasformazione disciplinata dell'EBITDA in cassa.",
+      rationale: "La generazione di cassa dipende dall'equilibrio tra ricavi, redditivita' e conversione; rompere uno di questi tre pilastri erode rapidamente il valore.",
+      evidence: `Crescita ricavi ${latestYear}: ${isFiniteNumber(snapshot.metrics.revenueGrowth) ? snapshot.metrics.revenueGrowth.toFixed(1) : "N/D"}%; EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%; cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%.`,
       priority: "medium",
     });
   }
@@ -2176,29 +2397,29 @@ function buildFallbackInsights(financialData: any) {
     if (theme === "margini_pricing") {
       recommendations.push({
         theme,
-        title: "Difendere prezzo e mix",
-        description: "Rivedi i segmenti a bassa resa economica e proteggi il margine con una disciplina piu' selettiva su listini, sconti e mix clienti.",
-        rationale: "Il pricing e il mix sono la leva piu' rapida per evitare che la crescita dei volumi eroda il ritorno operativo.",
-        evidence: `EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
+        title: "Difendere il margine con piu' produttivita' operativa",
+        description: "Misura con severita' pricing, produttivita' del personale e automazione possibile; se i ricavi per dipendente sono bassi, intervieni su organizzazione, AI, outsourcing o struttura dell'organico.",
+        rationale: "Quando il margine non cresce, l'aumento dei volumi rischia di portare con se' piu' complessita' che valore.",
+        evidence: `EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%; ricavi per dipendente ${latestYear}: ${isFiniteNumber(revenuePerEmployee) ? (revenuePerEmployee / 1_000).toFixed(0) : "N/D"}k.`,
         priority: "medium",
       });
     }
     if (theme === "capitale_circolante") {
       recommendations.push({
         theme,
-        title: "Mettere a target il rilascio di cassa operativo",
-        description: "Traduci crediti, scorte e pagamenti in target settimanali e responsabilita' operative, invece di gestire il circolante solo a consuntivo.",
-        rationale: "Il circolante non si corregge a fine anno: serve una disciplina commerciale e operativa continua.",
-        evidence: `DSO ${latestYear}: ${isFiniteNumber(latest?.dso) ? latest.dso.toFixed(0) : "N/D"} gg; DIO ${latestYear}: ${isFiniteNumber(latest?.dio) ? latest.dio.toFixed(0) : "N/D"} gg; DPO ${latestYear}: ${isFiniteNumber(latest?.dpo) ? latest.dpo.toFixed(0) : "N/D"} gg.`,
+        title: "Mettere a target il rilascio di cassa dal circolante",
+        description: "Traduci crediti, scorte e pagamenti in target settimanali di cassa, con ownership commerciale e operations, perche' e' qui che spesso si perde la conversione.",
+        rationale: "Il capitale circolante e' la perdita di cassa piu' frequente nelle PMI: se non lo governi, l'EBITDA resta contabile.",
+        evidence: `DSO ${latestYear}: ${isFiniteNumber(latest?.dso) ? latest.dso.toFixed(0) : "N/D"} gg; DIO ${latestYear}: ${isFiniteNumber(latest?.dio) ? latest.dio.toFixed(0) : "N/D"} gg; DPO ${latestYear}: ${isFiniteNumber(latest?.dpo) ? latest.dpo.toFixed(0) : "N/D"} gg; NWC / ricavi ${latestYear}: ${isFiniteNumber(latest?.nwc_pct_revenue) ? latest.nwc_pct_revenue.toFixed(1) : "N/D"}%.`,
         priority: "medium",
       });
     }
     if (theme === "debito_struttura") {
       recommendations.push({
         theme,
-        title: "Preservare headroom finanziaria",
-        description: "Mantieni margine di manovra su linee e covenant impliciti prima di assumere nuovo fabbisogno da crescita o investimenti.",
-        rationale: "La resilienza finanziaria si costruisce prima dello stress, non dopo.",
+        title: "Preservare headroom finanziaria finche' la cassa non migliora",
+        description: "Evita di usare nuovo debito per coprire inefficienze di margine o conversione in cassa: prima correggi il motore operativo, poi riapri il tema della crescita finanziata.",
+        rationale: "La leva amplifica sia i business forti sia quelli fragili; se la cassa e' debole, il debito restringe le opzioni invece di ampliararle.",
         evidence: `Debito netto / EBITDA ${latestYear}: ${isFiniteNumber(latest?.net_debt_ebitda) ? latest.net_debt_ebitda.toFixed(1) : "N/D"}x; Debt / Equity ${latestYear}: ${isFiniteNumber(latest?.debt_equity) ? latest.debt_equity.toFixed(1) : "N/D"}x.`,
         priority: "medium",
       });
@@ -2206,35 +2427,39 @@ function buildFallbackInsights(financialData: any) {
     if (theme === "allocazione_capitale") {
       recommendations.push({
         theme,
-        title: "Stringere le priorita' di investimento",
-        description: "Rendi il capex piu' selettivo e subordinato a ritorni rapidi in cassa, soprattutto finche' il business non converte stabilmente EBITDA in UFCF.",
-        rationale: "L'allocazione del capitale e' la leva che piu' rapidamente cambia la qualita' del rendimento per soci e finanziatori.",
-        evidence: `UFCF ${latestYear}: ${isFiniteNumber(latest?.unlevered_free_cash_flow) ? (latest.unlevered_free_cash_flow / 1_000_000).toFixed(1) : "N/D"}m; Cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%.`,
+        title: "Stringere capex e tax cash-out dove drenano valore",
+        description: "Se capex o fiscalita' stanno assorbendo troppa cassa, porta questi due capitoli sotto governance esplicita: asset-light dove possibile e tax review con specialisti dove opportuno.",
+        rationale: "Cash conversion non vuol dire solo incassi: anche capex e imposte possono distruggere il rendimento del capitale se non sono governati.",
+        evidence: `Capex / ricavi ${latestYear}: ${isFiniteNumber(capexPctRevenue) ? capexPctRevenue.toFixed(1) : "N/D"}%; taxes / EBITDA ${latestYear}: ${isFiniteNumber(taxesPctEbitda) ? taxesPctEbitda.toFixed(1) : "N/D"}%; UFCF ${latestYear}: ${isFiniteNumber(latest?.unlevered_free_cash_flow) ? (latest.unlevered_free_cash_flow / 1_000_000).toFixed(1) : "N/D"}m.`,
         priority: "medium",
       });
     }
     if (theme === "crescita_posizionamento") {
       recommendations.push({
         theme,
-        title: "Concentrare la crescita dove il ritorno e' difendibile",
-        description: "Confronta i segmenti che crescono con quelli che mantengono margini e cassa, e sposta risorse verso le aree con economics piu' robusti.",
-        rationale: "La qualita' del posizionamento si misura nella capacita' di crescere senza distruggere cassa o rendimento operativo.",
-        evidence: `Ricavi ${latestYear}: ${isFiniteNumber(latest?.fatturato) ? (latest.fatturato / 1_000_000).toFixed(1) : "N/D"}m; EBITDA margin ${latestYear}: ${isFiniteNumber(snapshot.metrics.ebitdaMargin) ? snapshot.metrics.ebitdaMargin.toFixed(1) : "N/D"}%.`,
+        title: "Concentrare la crescita dove aumenta la cassa per euro di ricavo",
+        description: "Non inseguire solo top line: sposta energia commerciale verso le aree che tengono prezzo, margine e assorbimento di circolante sotto controllo.",
+        rationale: "La crescita e' utile solo se aumenta la cassa generata dal business, non se allarga il perimetro di complessita' con economics peggiori.",
+        evidence: `Ricavi ${latestYear}: ${isFiniteNumber(latest?.fatturato) ? (latest.fatturato / 1_000_000).toFixed(1) : "N/D"}m; crescita ricavi ${latestYear}: ${isFiniteNumber(snapshot.metrics.revenueGrowth) ? snapshot.metrics.revenueGrowth.toFixed(1) : "N/D"}%; cash conversion ${latestYear}: ${isFiniteNumber(snapshot.metrics.cashConversion) ? snapshot.metrics.cashConversion.toFixed(1) : "N/D"}%.`,
         priority: "low",
       });
     }
   }
+
+  const workingCapitalDebt = {
+    summary: bullets[0] || "La lettura di capitale circolante e debito resta limitata ai dati effettivamente disponibili.",
+    bullets: bullets.length > 0 ? bullets : ["Servono piu' dettagli di bilancio per una lettura completa di circolante e debito."],
+  };
+  const normalizedRecommendations = recommendations.slice(0, 5);
 
   return {
     marketBenchmarks: {
       metrics: [] as any[],
       sources: [] as Array<{ title: string; url: string }>,
     },
-    workingCapitalDebt: {
-      summary: bullets[0] || "La lettura di capitale circolante e debito resta limitata ai dati effettivamente disponibili.",
-      bullets: bullets.length > 0 ? bullets : ["Servono piu' dettagli di bilancio per una lettura completa di circolante e debito."],
-    },
-    recommendations: recommendations.slice(0, 5),
+    workingCapitalDebt,
+    recommendations: normalizedRecommendations,
+    ceoBrief: buildFallbackCeoBrief(financialData, workingCapitalDebt, normalizedRecommendations),
   };
 }
 
@@ -2245,6 +2470,19 @@ function buildRecommendationContext(companyDetails: any, financialData: any, mar
   const previousYear = snapshot.years[1] || null;
   const latest = latestYear ? bilanci?.[latestYear] : null;
   const previous = previousYear ? bilanci?.[previousYear] : null;
+  const benchmarkByMetric = new Map(
+    (Array.isArray(marketBenchmarks?.metrics) ? marketBenchmarks.metrics : []).map((item: any) => [
+      String(item?.metric || "").toLowerCase(),
+      item,
+    ]),
+  );
+  const latestRevenuePerEmployee = calculatePerEmployeeMetric(latest?.fatturato, latest?.dipendenti);
+  const previousRevenuePerEmployee = calculatePerEmployeeMetric(previous?.fatturato, previous?.dipendenti);
+  const latestPersonnelCostPctRevenue = calculatePercentage(latest?.costo_personale, latest?.fatturato);
+  const previousPersonnelCostPctRevenue = calculatePercentage(previous?.costo_personale, previous?.fatturato);
+  const latestTaxesPctEbitda = calculatePercentage(latest?.taxes, latest?.ebitda);
+  const latestCapexPctRevenue = calculatePercentage(latest?.capex, latest?.fatturato);
+  const latestChangeNwcPctRevenue = calculatePercentage(latest?.change_nwc, latest?.fatturato);
 
   return {
     companyName: companyDetails?.denominazione || null,
@@ -2260,11 +2498,23 @@ function buildRecommendationContext(companyDetails: any, financialData: any, mar
           netIncome: latest?.utile_netto ?? null,
           netMargin: snapshot.metrics.netMargin,
           cashConversion: snapshot.metrics.cashConversion,
+          taxes: latest?.taxes ?? null,
+          taxesPctEbitda: latestTaxesPctEbitda,
+          capex: latest?.capex ?? null,
+          capexPctRevenue: latestCapexPctRevenue,
+          changeNwc: latest?.change_nwc ?? null,
+          changeNwcPctRevenue: latestChangeNwcPctRevenue,
+          unleveredFreeCashFlow: latest?.unlevered_free_cash_flow ?? null,
           nwc: latest?.nwc ?? null,
           nwcPctRevenue: latest?.nwc_pct_revenue ?? null,
           dso: latest?.dso ?? null,
           dio: latest?.dio ?? null,
           dpo: latest?.dpo ?? null,
+          personnelCost: latest?.costo_personale ?? null,
+          personnelCostPctRevenue: latestPersonnelCostPctRevenue,
+          employees: latest?.dipendenti ?? null,
+          revenuePerEmployee: latestRevenuePerEmployee,
+          averageGrossSalary: latest?.stipendio_medio_lordo ?? null,
           netDebt: latest?.net_debt ?? null,
           netDebtEbitda: latest?.net_debt_ebitda ?? null,
           debtEquity: latest?.debt_equity ?? null,
@@ -2281,9 +2531,21 @@ function buildRecommendationContext(companyDetails: any, financialData: any, mar
             isFiniteNumber(latest?.cash_conversion) && isFiniteNumber(previous?.cash_conversion)
               ? Number((latest.cash_conversion - previous.cash_conversion).toFixed(1))
               : null,
+          revenuePerEmployeeChangePct:
+            isFiniteNumber(latestRevenuePerEmployee) && isFiniteNumber(previousRevenuePerEmployee) && previousRevenuePerEmployee !== 0
+              ? Number((((latestRevenuePerEmployee - previousRevenuePerEmployee) / previousRevenuePerEmployee) * 100).toFixed(1))
+              : null,
+          personnelCostPctRevenueChangePts:
+            isFiniteNumber(latestPersonnelCostPctRevenue) && isFiniteNumber(previousPersonnelCostPctRevenue)
+              ? Number((latestPersonnelCostPctRevenue - previousPersonnelCostPctRevenue).toFixed(1))
+              : null,
           nwcPctRevenueChangePts:
             isFiniteNumber(latest?.nwc_pct_revenue) && isFiniteNumber(previous?.nwc_pct_revenue)
               ? Number((latest.nwc_pct_revenue - previous.nwc_pct_revenue).toFixed(1))
+              : null,
+          capexPctRevenueChangePts:
+            isFiniteNumber(latestCapexPctRevenue) && isFiniteNumber(calculatePercentage(previous?.capex, previous?.fatturato))
+              ? Number((latestCapexPctRevenue - calculatePercentage(previous?.capex, previous?.fatturato)!).toFixed(1))
               : null,
           netDebtEbitdaChange:
             isFiniteNumber(latest?.net_debt_ebitda) && isFiniteNumber(previous?.net_debt_ebitda)
@@ -2299,10 +2561,18 @@ function buildRecommendationContext(companyDetails: any, financialData: any, mar
       netIncome: bilanci?.[year]?.utile_netto ?? null,
       netMargin: calculatePercentage(bilanci?.[year]?.utile_netto, bilanci?.[year]?.fatturato),
       cashConversion: bilanci?.[year]?.cash_conversion ?? null,
+      taxes: bilanci?.[year]?.taxes ?? null,
+      capex: bilanci?.[year]?.capex ?? null,
+      changeNwc: bilanci?.[year]?.change_nwc ?? null,
+      unleveredFreeCashFlow: bilanci?.[year]?.unlevered_free_cash_flow ?? null,
       nwcPctRevenue: bilanci?.[year]?.nwc_pct_revenue ?? null,
       dso: bilanci?.[year]?.dso ?? null,
       dio: bilanci?.[year]?.dio ?? null,
       dpo: bilanci?.[year]?.dpo ?? null,
+      personnelCost: bilanci?.[year]?.costo_personale ?? null,
+      personnelCostPctRevenue: calculatePercentage(bilanci?.[year]?.costo_personale, bilanci?.[year]?.fatturato),
+      employees: bilanci?.[year]?.dipendenti ?? null,
+      revenuePerEmployee: calculatePerEmployeeMetric(bilanci?.[year]?.fatturato, bilanci?.[year]?.dipendenti),
       netDebtEbitda: bilanci?.[year]?.net_debt_ebitda ?? null,
     })),
     marketBenchmarks: Array.isArray(marketBenchmarks?.metrics)
@@ -2316,6 +2586,35 @@ function buildRecommendationContext(companyDetails: any, financialData: any, mar
           confidence: item?.confidence ?? null,
         }))
       : [],
+    cashGenerationDrivers: {
+      growth: {
+        revenueGrowthPct: snapshot.metrics.revenueGrowth,
+        benchmark: benchmarkByMetric.get("revenue growth") || null,
+      },
+      ebitdaMargin: {
+        ebitdaMarginPct: snapshot.metrics.ebitdaMargin,
+        personnelCostPctRevenue: latestPersonnelCostPctRevenue,
+        revenuePerEmployee: latestRevenuePerEmployee,
+        employees: latest?.dipendenti ?? null,
+        averageGrossSalary: latest?.stipendio_medio_lordo ?? null,
+        benchmark: benchmarkByMetric.get("ebitda margin") || null,
+      },
+      cashConversion: {
+        cashConversionPct: snapshot.metrics.cashConversion,
+        nwcPctRevenue: latest?.nwc_pct_revenue ?? null,
+        dso: latest?.dso ?? null,
+        dio: latest?.dio ?? null,
+        dpo: latest?.dpo ?? null,
+        taxes: latest?.taxes ?? null,
+        taxesPctEbitda: latestTaxesPctEbitda,
+        capex: latest?.capex ?? null,
+        capexPctRevenue: latestCapexPctRevenue,
+        changeNwc: latest?.change_nwc ?? null,
+        changeNwcPctRevenue: latestChangeNwcPctRevenue,
+        unleveredFreeCashFlow: latest?.unlevered_free_cash_flow ?? null,
+        benchmark: benchmarkByMetric.get("cash conversion") || benchmarkByMetric.get("working capital intensity") || null,
+      },
+    },
     recommendationTracks: [
       "margini_pricing",
       "capitale_circolante",
@@ -2414,9 +2713,9 @@ async function generateMarketBenchmarks(companyDetails: any, financialData: any,
   try {
     const metrics = [
       { metric: "EBITDA margin", companyValue: snapshot.metrics.ebitdaMargin, unit: "percent" },
-      { metric: "Net margin", companyValue: snapshot.metrics.netMargin, unit: "percent" },
       { metric: "Revenue growth", companyValue: snapshot.metrics.revenueGrowth, unit: "percent" },
       { metric: "Cash conversion", companyValue: snapshot.metrics.cashConversion, unit: "percent" },
+      { metric: "Working capital intensity", companyValue: snapshot.metrics.nwcPctRevenue, unit: "percent" },
     ];
 
     const result = await createStructuredResponse<{
@@ -2456,6 +2755,8 @@ Regole:
               revenue: financialData?.bilanci?.[year]?.fatturato ?? null,
               ebitda: financialData?.bilanci?.[year]?.ebitda ?? null,
               ebitdaMargin: calculatePercentage(financialData?.bilanci?.[year]?.ebitda, financialData?.bilanci?.[year]?.fatturato),
+              cashConversion: financialData?.bilanci?.[year]?.cash_conversion ?? null,
+              nwcPctRevenue: financialData?.bilanci?.[year]?.nwc_pct_revenue ?? null,
             })),
           }, null, 2),
         }],
@@ -2521,20 +2822,28 @@ async function generateWorkingCapitalDebtAndRecommendations(companyDetails: any,
     }>({
       apiKey,
       model: getOpenaiChatModel(),
-      instructions: `Sei un consulente strategico-finanziario senior che scrive l'ultima pagina di un investment memo / credit memo per una PMI italiana.
+      instructions: `Sei un consulente strategico-finanziario senior. Devi spiegare come una PMI genera o distrugge cassa attraverso tre leve: crescita, EBITDA margin e cash conversion.
 Hai gia' a disposizione un memo interno di lavoro e un set di numeri strutturati. Il tuo compito non e' commentare genericamente i dati, ma trasformarli in una diagnosi manageriale e in raccomandazioni vere.
 Restituisci:
 - una diagnosi sintetica di working capital e debito
 - 4-5 raccomandazioni prioritarie
 Regole:
 - scrivi come un advisor serio, non come un assistente generalista
+- ragiona sempre dentro questo framework:
+  1. come sta andando la crescita e cosa puo' aumentarla senza peggiorare la cassa
+  2. come sta andando l'EBITDA margin e cosa puo' aumentarlo
+  3. come sta andando la cash conversion e dove si perde la cassa
 - ogni raccomandazione deve avere un focus diverso e non ripetere la stessa idea con parole diverse
-- devi coprire il piu' possibile le cinque piste seguenti, se i dati lo consentono: margini/pricing, capitale circolante, debito/struttura finanziaria, allocazione del capitale, crescita/posizionamento
+- copri obbligatoriamente le tre leve crescita / EBITDA margin / cash conversion; le altre piste servono solo se aiutano a migliorare una di queste tre
 - non e' accettabile restituire una sola raccomandazione o raccomandazioni quasi duplicate
 - parti dal problema economico-finanziario, spiega perche' conta e prescrivi un'azione concreta nei prossimi 90-180 giorni
 - usa numeri e anni specifici come evidenza quando disponibili
 - se i benchmark esistono, spiega esplicitamente dove l'azienda e' sopra o sotto il mercato
-- privilegia pricing, mix, struttura costi, rilascio cassa, disciplina commerciale, scorte, struttura del debito, covenant capacity, priorita' di capex
+- sulla crescita: valuta qualita' della crescita, pricing, mix, clienti/canali e se la crescita sta creando o distruggendo cassa
+- sull'EBITDA margin: guarda cost base, costo del personale, ricavi per dipendente, produttivita'; se i numeri lo giustificano, sii esplicito su automazione/AI, outsourcing, redesign organizzativo o riduzione dell'organico
+- sulla cash conversion: guarda UFCF, change NWC, DSO/DIO/DPO, capex e imposte; devi dire dove si perde la cassa
+- se il problema principale e' il capex, valuta modelli piu' asset-light o outsourcing
+- se il carico fiscale assorbe cassa in misura rilevante, suggerisci una revisione con specialisti per ottimizzazione fiscale / incentivi / tax planning, senza fare consulenza legale o fiscale
 - evita assolutamente formule vuote come "monitorare", "migliorare l'efficienza", "tenere sotto controllo" se non sono accompagnate da una leva precisa
 - niente meta-commenti sulle fonti o sulla qualita' del modello
 - niente informazioni non supportate dai dati
@@ -2578,6 +2887,115 @@ Regole:
       workingCapitalDebt: fallback.workingCapitalDebt,
       recommendations: fallback.recommendations,
     };
+  }
+}
+
+async function generateBusinessCeoBrief(
+  companyDetails: any,
+  financialData: any,
+  marketBenchmarks: any,
+  workingCapitalDebt: any,
+  recommendations: any[],
+  description: string,
+) {
+  const apiKey = getOpenaiApiKey();
+  const fallback = buildFallbackInsights(financialData).ceoBrief;
+  const normalizedRecommendations = Array.isArray(recommendations) ? recommendations : [];
+
+  if (!apiKey) {
+    return fallback;
+  }
+
+  try {
+    const context = buildRecommendationContext(companyDetails, financialData, marketBenchmarks, description);
+    if (!context.latestYear) return fallback;
+
+    const result = await createStructuredResponse<{
+      status: "strong" | "watch" | "critical";
+      headline: string;
+      verdict: string;
+      watchouts: string[];
+      topPriorities: Array<{
+        title: string;
+        action: string;
+        whyItMatters: string;
+        evidence: string;
+        impactArea: "cash" | "margin" | "risk" | "growth";
+        urgency: "30d" | "90d" | "180d";
+      }>;
+    }>({
+      apiKey,
+      model: getOpenaiChatModel(),
+      instructions: `Sei un advisor senior che prepara la prima pagina di lettura per CEO/fondatore di una PMI italiana.
+Il tuo output deve essere il brief iniziale che il CEO legge in 30 secondi prima di entrare nel dettaglio.
+Regole:
+- scrivi per CEO/fondatore, non per analista bancario
+- devi prendere posizione con un giudizio netto sul business
+- devi leggere il business attraverso tre leve: crescita, EBITDA margin e cash conversion
+- le priorita' devono scendere da una o piu' di queste tre leve, non da osservazioni laterali
+- usa numeri e anni specifici quando disponibili
+- niente riassunti scolastici del bilancio, niente meta-commenti sulle fonti, niente linguaggio generico
+- "watchouts" deve contenere massimo 3 punti brevi e rilevanti
+- "topPriorities" deve contenere esattamente 3 priorita', chiaramente diverse tra loro
+- ogni priorita' deve essere orientata a decisione e azione nei prossimi 30/90/180 giorni
+- "action" = cosa fare concretamente
+- "whyItMatters" = perche' conta in termini di cassa, margine, rischio o crescita
+- "evidence" = prova numerica con anno, gap o metrica disponibile
+- se il problema e' il margine, valuta esplicitamente pricing, costi, produttivita', ricavi per dipendente, AI, outsourcing o organico quando i numeri lo giustificano
+- se il problema e' la cash conversion, spiega se la perdita di cassa viene da capitale circolante, capex o imposte
+- se i dati sono incompleti, resta prudente ma utile; non lasciare campi vuoti`,
+      input: [{
+        role: "user",
+        content: [{
+          type: "input_text",
+          text: JSON.stringify({
+            companyContext: context,
+            workingCapitalDebt,
+            marketBenchmarks: Array.isArray(marketBenchmarks?.metrics) ? marketBenchmarks.metrics : [],
+            recommendations: normalizedRecommendations.map((item) => ({
+              title: item?.title ?? null,
+              description: item?.description ?? null,
+              rationale: item?.rationale ?? null,
+              evidence: item?.evidence ?? null,
+              priority: item?.priority ?? null,
+              theme: item?.theme ?? null,
+            })),
+          }, null, 2),
+        }],
+      }],
+      schemaName: "business_ceo_brief",
+      schema: CEO_BRIEF_SCHEMA,
+      maxOutputTokens: 2600,
+      reasoningEffort: "high",
+    });
+
+    return {
+      status: result?.status || fallback.status,
+      headline: typeof result?.headline === "string" && result.headline.trim() ? result.headline.trim() : fallback.headline,
+      verdict: typeof result?.verdict === "string" && result.verdict.trim() ? result.verdict.trim() : fallback.verdict,
+      watchouts: Array.isArray(result?.watchouts) && result.watchouts.length > 0
+        ? result.watchouts.map((item) => String(item).trim()).filter(Boolean).slice(0, 3)
+        : fallback.watchouts,
+      topPriorities: Array.isArray(result?.topPriorities) && result.topPriorities.length === 3
+        ? result.topPriorities.map((item, index) => ({
+            title: typeof item?.title === "string" && item.title.trim() ? item.title.trim() : fallback.topPriorities[index]?.title || `Priorita' ${index + 1}`,
+            action: typeof item?.action === "string" && item.action.trim() ? item.action.trim() : fallback.topPriorities[index]?.action || "",
+            whyItMatters: typeof item?.whyItMatters === "string" && item.whyItMatters.trim() ? item.whyItMatters.trim() : fallback.topPriorities[index]?.whyItMatters || "",
+            evidence: typeof item?.evidence === "string" && item.evidence.trim() ? item.evidence.trim() : fallback.topPriorities[index]?.evidence || "",
+            impactArea:
+              item?.impactArea === "cash" || item?.impactArea === "margin" || item?.impactArea === "risk" || item?.impactArea === "growth"
+                ? item.impactArea
+                : fallback.topPriorities[index]?.impactArea || "growth",
+            urgency:
+              item?.urgency === "30d" || item?.urgency === "90d" || item?.urgency === "180d"
+                ? item.urgency
+                : fallback.topPriorities[index]?.urgency || "90d",
+          }))
+        : fallback.topPriorities,
+    };
+  } catch (error: any) {
+    console.warn("CEO brief generation fallback:", error?.message || error);
+    return fallback;
   }
 }
 
@@ -3708,11 +4126,20 @@ export function registerRoutes(server: Server, app: Express): void {
         marketBenchmarks,
         descriptionPayload.description,
       );
+      const ceoBrief = await generateBusinessCeoBrief(
+        companyDetails,
+        financialData,
+        marketBenchmarks,
+        recommendationPayload.workingCapitalDebt,
+        recommendationPayload.recommendations,
+        descriptionPayload.description,
+      );
       const insights = {
         version: BUSINESS_INSIGHTS_VERSION,
         marketBenchmarks,
         workingCapitalDebt: recommendationPayload.workingCapitalDebt,
         recommendations: recommendationPayload.recommendations,
+        ceoBrief,
       };
       const financialDataWithInsights = {
         ...financialData,
