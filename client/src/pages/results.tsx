@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   ArrowLeft, Building2, MapPin, Mail, Phone, Globe, Loader2, FileText,
   CalendarDays,
-  TrendingUp, TrendingDown, Minus, Target, Users, ShieldCheck, AlertTriangle, Lightbulb,
+  TrendingUp, TrendingDown, Minus, Target, Users, ShieldCheck, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -162,21 +162,31 @@ interface SummaryStatItem {
   hint?: string;
 }
 
-interface CeoPriorityItem {
-  title: string;
-  action: string;
-  whyItMatters: string;
+type CheckPointStatus = "green" | "amber" | "red";
+type CheckPointKey = "growth" | "profitability" | "cashGeneration" | "debt";
+
+interface CheckPointItem {
+  key: CheckPointKey;
+  label: string;
+  status: CheckPointStatus;
+  metric: string;
+  judgment: string;
   evidence: string;
-  impactArea: "cash" | "margin" | "risk" | "growth";
-  urgency: "30d" | "90d" | "180d";
+}
+
+interface RecommendationTrackItem {
+  key: CheckPointKey;
+  label: string;
+  title: string;
+  diagnosis: string;
+  action: string;
+  evidence: string;
 }
 
 interface CeoBriefData {
-  status: "strong" | "watch" | "critical";
-  headline: string;
-  verdict: string;
-  watchouts: string[];
-  topPriorities: CeoPriorityItem[];
+  overview: string;
+  checkpoints: CheckPointItem[];
+  recommendationTracks: RecommendationTrackItem[];
 }
 
 interface KeyProductItem {
@@ -256,6 +266,39 @@ function calculatePerEmployeeValue(value: unknown, employees: unknown): number |
   return value / employees;
 }
 
+const CHECKPOINT_ORDER: Array<{ key: CheckPointKey; label: string }> = [
+  { key: "growth", label: "Crescita" },
+  { key: "profitability", label: "Profittabilita'" },
+  { key: "cashGeneration", label: "Generazione di cassa" },
+  { key: "debt", label: "Indebitamento" },
+];
+
+function formatCheckpointPercent(value: number | null): string {
+  return isFiniteNumeric(value) ? `${value.toFixed(1)}%` : "N/D";
+}
+
+function formatCheckpointMultiple(value: number | null): string {
+  return isFiniteNumeric(value) ? `${value.toFixed(1)}x` : "N/D";
+}
+
+function formatCheckpointPerEmployee(value: number | null): string {
+  if (!isFiniteNumeric(value)) return "N/D";
+  if (Math.abs(value) >= 1_000_000) return `€${(value / 1_000_000).toFixed(1)}m`;
+  if (Math.abs(value) >= 1_000) return `€${(value / 1_000).toFixed(0)}k`;
+  return `€${value.toFixed(0)}`;
+}
+
+function getCheckpointStatus(
+  value: number | null,
+  greenTest: (candidate: number) => boolean,
+  amberTest: (candidate: number) => boolean,
+): CheckPointStatus {
+  if (!isFiniteNumeric(value)) return "amber";
+  if (greenTest(value)) return "green";
+  if (amberTest(value)) return "amber";
+  return "red";
+}
+
 function buildLocalBusinessCeoBriefFromBilanci(bilanci: Record<string, any>): CeoBriefData | null {
   const years = Object.keys(bilanci || {})
     .filter((year) => {
@@ -281,86 +324,135 @@ function buildLocalBusinessCeoBriefFromBilanci(bilanci: Record<string, any>): Ce
   const taxesPctEbitda = calculateSafePercentage(latest?.taxes, latest?.ebitda);
   const capexPctRevenue = calculateSafePercentage(latest?.capex, latest?.fatturato);
   const changeNwcPctRevenue = calculateSafePercentage(latest?.change_nwc, latest?.fatturato);
-
-  let pressureScore = 0;
-  if (isFiniteNumeric(revenueGrowth) && revenueGrowth < 0) pressureScore += 2;
-  else if (isFiniteNumeric(revenueGrowth) && revenueGrowth < 5) pressureScore += 1;
-  if (isFiniteNumeric(ebitdaMargin) && ebitdaMargin < 8) pressureScore += 2;
-  else if (isFiniteNumeric(ebitdaMargin) && ebitdaMargin < 12) pressureScore += 1;
-  if (isFiniteNumeric(cashConversion) && cashConversion < 40) pressureScore += 2;
-  else if (isFiniteNumeric(cashConversion) && cashConversion < 60) pressureScore += 1;
-
-  const status: CeoBriefData["status"] = pressureScore >= 4 ? "critical" : pressureScore >= 2 ? "watch" : "strong";
-  const headline =
-    status === "critical"
-      ? "La cassa non e' abbastanza protetta: crescita, margine e conversione vanno riallineati."
-      : status === "watch"
-        ? "Il business va guidato piu' duramente su crescita, EBITDA margin e cash conversion."
-        : "Il business tiene, ma la cassa si difende solo con disciplina sulle tre leve chiave.";
-  const verdict = `Nel ${latestYear} la lettura corretta e': crescita ${isFiniteNumeric(revenueGrowth) ? `${revenueGrowth.toFixed(1)}%` : "N/D"}, EBITDA margin ${isFiniteNumeric(ebitdaMargin) ? `${ebitdaMargin.toFixed(1)}%` : "N/D"}, cash conversion ${isFiniteNumeric(cashConversion) ? `${cashConversion.toFixed(1)}%` : "N/D"}.`;
+  const netDebtEbitda = isFiniteNumeric(latest?.net_debt_ebitda) ? latest.net_debt_ebitda : null;
+  const debtEquity = isFiniteNumeric(latest?.debt_equity) ? latest.debt_equity : null;
 
   const cashLeakLabel =
     isFiniteNumeric(changeNwcPctRevenue) && changeNwcPctRevenue > Math.max(capexPctRevenue ?? 0, taxesPctEbitda ?? 0)
-      ? "circolante"
+      ? "capitale circolante"
       : isFiniteNumeric(capexPctRevenue) && capexPctRevenue > Math.max(changeNwcPctRevenue ?? 0, taxesPctEbitda ?? 0)
         ? "capex"
         : isFiniteNumeric(taxesPctEbitda) && taxesPctEbitda > 0
           ? "imposte"
           : "conversione operativa";
 
-  const growthPriority: CeoPriorityItem = {
-    title:
-      isFiniteNumeric(revenueGrowth) && revenueGrowth < 0
-        ? "Rimettere in moto una crescita che non distrugga cassa"
-        : "Accelerare la crescita dove prezzo e cassa reggono",
-    action: "Concentra lo sforzo commerciale su linee, clienti e canali che mantengono pricing, margine e assorbimento di circolante sotto controllo; evita volume che allarga solo il fabbisogno.",
-    whyItMatters: "La crescita conta solo se aumenta l'EBITDA e non consuma piu' cassa di quella che crea.",
-    evidence: `Ricavi ${latestYear}: ${isFiniteNumeric(latest?.fatturato) ? formatCurrency(latest.fatturato) : "N/D"}; crescita ricavi ${latestYear}: ${isFiniteNumeric(revenueGrowth) ? `${revenueGrowth.toFixed(1)}%` : "N/D"}.`,
-    impactArea: "growth",
-    urgency: isFiniteNumeric(revenueGrowth) && revenueGrowth < 0 ? "30d" : "90d",
-  };
+  const growthStatus = getCheckpointStatus(revenueGrowth, (value) => value >= 10, (value) => value >= 0);
+  const profitabilityStatus = getCheckpointStatus(ebitdaMargin, (value) => value >= 15, (value) => value >= 8);
+  const cashStatus = getCheckpointStatus(cashConversion, (value) => value >= 80, (value) => value >= 50);
+  const debtStatus = getCheckpointStatus(netDebtEbitda, (value) => value <= 2, (value) => value <= 4);
 
-  const marginPriority: CeoPriorityItem = {
-    title: "Alzare l'EBITDA margin con pricing, produttivita' e cost base",
-    action: "Verifica se il margine va recuperato da repricing, mix migliore, taglio costi, redesign dell'organizzazione, AI, outsourcing o riduzione selettiva dell'organico dove la produttivita' e' debole.",
-    whyItMatters: "Se il margine resta troppo basso, ogni euro di ricavo aggiuntivo genera poco valore e poca autofinanziabilita'.",
-    evidence: `EBITDA margin ${latestYear}: ${isFiniteNumeric(ebitdaMargin) ? `${ebitdaMargin.toFixed(1)}%` : "N/D"}; costo personale / ricavi ${latestYear}: ${isFiniteNumeric(personnelCostPctRevenue) ? `${personnelCostPctRevenue.toFixed(1)}%` : "N/D"}; ricavi per dipendente ${latestYear}: ${isFiniteNumeric(revenuePerEmployee) ? formatCurrency(revenuePerEmployee) : "N/D"}.`,
-    impactArea: "margin",
-    urgency:
-      (isFiniteNumeric(ebitdaMargin) && ebitdaMargin < 10) ||
-      (isFiniteNumeric(personnelCostPctRevenue) && personnelCostPctRevenue > 20)
-        ? "30d"
-        : "90d",
-  };
+  const overallScore =
+    (growthStatus === "red" ? 2 : growthStatus === "amber" ? 1 : 0) +
+    (profitabilityStatus === "red" ? 2 : profitabilityStatus === "amber" ? 1 : 0) +
+    (cashStatus === "red" ? 2 : cashStatus === "amber" ? 1 : 0) +
+    (debtStatus === "red" ? 2 : debtStatus === "amber" ? 1 : 0);
 
-  const cashPriority: CeoPriorityItem = {
-    title: "Chiudere la perdita di cassa nella cash conversion",
-    action:
-      cashLeakLabel === "circolante"
-        ? "Attacca subito crediti, scorte e termini fornitori con target di rilascio cassa e ownership operativa chiara."
-        : cashLeakLabel === "capex"
-          ? "Taglia o rinvia capex non essenziali e valuta modelli piu' asset-light o outsourcing dove il capitale investito rende poco."
-          : cashLeakLabel === "imposte"
-            ? "Apri una revisione fiscale con specialisti per capire se il tax cash-out e' ottimizzabile con incentivi, crediti o una struttura piu' efficiente."
-            : "Scomponi la cash conversion tra circolante, capex e imposte e assegna una leva concreta a ciascuna perdita di cassa.",
-    whyItMatters: "La cassa non si misura con l'EBITDA ma con quanto EBITDA riesci davvero a trasformare in UFCF.",
-    evidence: `Cash conversion ${latestYear}: ${isFiniteNumeric(cashConversion) ? `${cashConversion.toFixed(1)}%` : "N/D"}; NWC / ricavi ${latestYear}: ${isFiniteNumeric(latest?.nwc_pct_revenue) ? `${latest.nwc_pct_revenue.toFixed(1)}%` : "N/D"}; capex / ricavi ${latestYear}: ${isFiniteNumeric(capexPctRevenue) ? `${capexPctRevenue.toFixed(1)}%` : "N/D"}; taxes / EBITDA ${latestYear}: ${isFiniteNumeric(taxesPctEbitda) ? `${taxesPctEbitda.toFixed(1)}%` : "N/D"}.`,
-    impactArea: "cash",
-    urgency: isFiniteNumeric(cashConversion) && cashConversion < 60 ? "30d" : "90d",
-  };
-
-  const watchouts = [
-    `Growth ${latestYear}: ${isFiniteNumeric(revenueGrowth) ? `${revenueGrowth.toFixed(1)}%` : "N/D"}.`,
-    `EBITDA margin ${latestYear}: ${isFiniteNumeric(ebitdaMargin) ? `${ebitdaMargin.toFixed(1)}%` : "N/D"} con ricavi per dipendente ${isFiniteNumeric(revenuePerEmployee) ? formatCurrency(revenuePerEmployee) : "N/D"}.`,
-    `Cash conversion ${latestYear}: ${isFiniteNumeric(cashConversion) ? `${cashConversion.toFixed(1)}%` : "N/D"}; perdita principale su ${cashLeakLabel}.`,
-  ];
+  const overview =
+    overallScore >= 6
+      ? `Nel ${latestYear} il business va ricentrato sulla cassa: crescita, profittabilita' e leva non stanno ancora lavorando insieme.`
+      : overallScore >= 3
+        ? `Nel ${latestYear} l'azienda ha leve utili, ma va guidata con piu' disciplina su crescita, profittabilita' e conversione in cassa.`
+        : `Nel ${latestYear} il business appare ordinato; il punto adesso e' proteggere la cassa senza perdere qualita' di crescita.`;
 
   return {
-    status,
-    headline,
-    verdict,
-    watchouts,
-    topPriorities: [growthPriority, marginPriority, cashPriority],
+    overview,
+    checkpoints: [
+      {
+        key: "growth",
+        label: "Crescita",
+        status: growthStatus,
+        metric: `Ricavi ${latestYear} ${formatCheckpointPercent(revenueGrowth)}`,
+        judgment:
+          growthStatus === "green"
+            ? "La crescita passata e' buona, ora va difesa senza allargare il fabbisogno."
+            : growthStatus === "amber"
+              ? "La crescita c'e', ma non e' ancora abbastanza forte da essere un vantaggio strutturale."
+              : "La crescita e' debole o negativa: prima di spingere volume va chiarita la qualita' dei ricavi.",
+        evidence: `Crescita ricavi ${latestYear}: ${formatCheckpointPercent(revenueGrowth)}; ricavi ${latestYear}: ${isFiniteNumeric(latest?.fatturato) ? formatCurrency(latest.fatturato) : "N/D"}; cash conversion ${latestYear}: ${formatCheckpointPercent(cashConversion)}.`,
+      },
+      {
+        key: "profitability",
+        label: "Profittabilita'",
+        status: profitabilityStatus,
+        metric: `EBITDA margin ${latestYear} ${formatCheckpointPercent(ebitdaMargin)}`,
+        judgment:
+          profitabilityStatus === "green"
+            ? "La profittabilita' e' buona, ma va tenuta alta con pricing e produttivita'."
+            : profitabilityStatus === "amber"
+              ? "Il margine e' utilizzabile, ma non ancora abbastanza forte per assorbire errori o crescita debole."
+              : "La profittabilita' e' troppo bassa: costi e produttivita' vanno affrontati con piu' decisione.",
+        evidence: `EBITDA margin ${latestYear}: ${formatCheckpointPercent(ebitdaMargin)}; costo personale / ricavi ${latestYear}: ${formatCheckpointPercent(personnelCostPctRevenue)}; ricavi per dipendente ${latestYear}: ${formatCheckpointPerEmployee(revenuePerEmployee)}.`,
+      },
+      {
+        key: "cashGeneration",
+        label: "Generazione di cassa",
+        status: cashStatus,
+        metric: `Cash conversion ${latestYear} ${formatCheckpointPercent(cashConversion)}`,
+        judgment:
+          cashStatus === "green"
+            ? "La cassa viene generata bene, ma il rilascio va protetto su circolante, capex e imposte."
+            : cashStatus === "amber"
+              ? "La cassa arriva solo in parte: tra EBITDA e UFCF si disperde ancora troppo."
+              : "La generazione di cassa e' debole: oggi il business trattiene troppo poco dell'EBITDA.",
+        evidence: `Cash conversion ${latestYear}: ${formatCheckpointPercent(cashConversion)}; change NWC / ricavi ${latestYear}: ${formatCheckpointPercent(changeNwcPctRevenue)}; capex / ricavi ${latestYear}: ${formatCheckpointPercent(capexPctRevenue)}; perdita principale su ${cashLeakLabel}.`,
+      },
+      {
+        key: "debt",
+        label: "Indebitamento",
+        status: debtStatus,
+        metric: `Net debt / EBITDA ${latestYear} ${formatCheckpointMultiple(netDebtEbitda)}`,
+        judgment:
+          debtStatus === "green"
+            ? "L'indebitamento e' gestibile e non sembra bloccare la manovra."
+            : debtStatus === "amber"
+              ? "La leva va presidiata: non e' fuori scala, ma riduce il margine di errore."
+              : "L'indebitamento e' alto rispetto all'EBITDA e amplifica il rischio operativo.",
+        evidence: `Debito netto / EBITDA ${latestYear}: ${formatCheckpointMultiple(netDebtEbitda)}; Debt / Equity ${latestYear}: ${formatCheckpointMultiple(debtEquity)}; cash conversion ${latestYear}: ${formatCheckpointPercent(cashConversion)}.`,
+      },
+    ],
+    recommendationTracks: [
+      {
+        key: "growth",
+        label: "Crescita",
+        title: isFiniteNumeric(revenueGrowth) && revenueGrowth < 0
+          ? "Ripartire con crescita che non bruci cassa"
+          : "Aumentare la crescita dove prezzo e cassa reggono",
+        diagnosis: "La crescita conta solo se tiene insieme ricavi, margine e circolante. Se il business cresce in aree che assorbono troppo capitale, la top line non si traduce in cassa.",
+        action: "Sposta energia commerciale su clienti, prodotti e canali che mantengono pricing, margine e tempi di incasso sotto controllo; evita crescita che allarga solo il fabbisogno.",
+        evidence: `Crescita ricavi ${latestYear}: ${formatCheckpointPercent(revenueGrowth)}; ricavi ${latestYear}: ${isFiniteNumeric(latest?.fatturato) ? formatCurrency(latest.fatturato) : "N/D"}; cash conversion ${latestYear}: ${formatCheckpointPercent(cashConversion)}.`,
+      },
+      {
+        key: "profitability",
+        label: "Profittabilita'",
+        title: "Alzare la profittabilita' intervenendo su cost base e produttivita'",
+        diagnosis: "Se l'EBITDA margin resta compresso, ogni euro di ricavo aggiuntivo vale troppo poco. Qui vanno guardati pricing, costo del personale, ricavi per dipendente e grado di automazione.",
+        action: "Verifica dove recuperare margine con repricing, mix migliore, AI, outsourcing, redesign organizzativo o riduzione selettiva dell'organico se la produttivita' non giustifica la struttura.",
+        evidence: `EBITDA margin ${latestYear}: ${formatCheckpointPercent(ebitdaMargin)}; costo personale / ricavi ${latestYear}: ${formatCheckpointPercent(personnelCostPctRevenue)}; ricavi per dipendente ${latestYear}: ${formatCheckpointPerEmployee(revenuePerEmployee)}.`,
+      },
+      {
+        key: "cashGeneration",
+        label: "Generazione di cassa",
+        title: "Chiudere la perdita di cassa dove il business la disperde davvero",
+        diagnosis: "La cash conversion non si migliora in astratto: bisogna isolare se la cassa si perde nel circolante, nel capex o nelle imposte e dare ownership chiara a ciascun leak.",
+        action:
+          cashLeakLabel === "capitale circolante"
+            ? "Attacca crediti, scorte e termini fornitori con target di rilascio cassa; se il problema sono i capex, valuta modelli piu' asset-light o outsourcing; se sono le imposte, apri una review fiscale specialistica."
+            : cashLeakLabel === "capex"
+              ? "Taglia o rinvia capex non essenziali, valuta alternative asset-light e non finanziare investimenti che non tornano in cassa; tieni comunque il circolante sotto target."
+              : cashLeakLabel === "imposte"
+                ? "Apri subito una revisione fiscale con specialisti per capire quanto tax cash-out sia ottimizzabile; in parallelo tieni circolante e capex sotto governance esplicita."
+                : "Scomponi la cash conversion tra circolante, capex e imposte e assegna una leva concreta a ciascuna perdita di cassa.",
+        evidence: `Cash conversion ${latestYear}: ${formatCheckpointPercent(cashConversion)}; change NWC / ricavi ${latestYear}: ${formatCheckpointPercent(changeNwcPctRevenue)}; capex / ricavi ${latestYear}: ${formatCheckpointPercent(capexPctRevenue)}; taxes / EBITDA ${latestYear}: ${formatCheckpointPercent(taxesPctEbitda)}.`,
+      },
+      {
+        key: "debt",
+        label: "Indebitamento",
+        title: "Impedire che la leva peggiori un problema operativo",
+        diagnosis: "Il debito non crea il problema, ma lo amplifica quando margine e cash conversion non sono abbastanza robusti. Se la leva e' tesa, riduce opzioni strategiche e headroom bancaria.",
+        action: "Prima difendi cassa e margine, poi riapri il tema della crescita finanziata. Evita nuovo debito per coprire inefficienze operative che il business non sta assorbendo.",
+        evidence: `Debito netto / EBITDA ${latestYear}: ${formatCheckpointMultiple(netDebtEbitda)}; Debt / Equity ${latestYear}: ${formatCheckpointMultiple(debtEquity)}; cash conversion ${latestYear}: ${formatCheckpointPercent(cashConversion)}.`,
+      },
+    ],
   };
 }
 
@@ -389,124 +481,112 @@ function getBenchmarkStatusTone(status: string | undefined) {
   };
 }
 
-function getCeoBriefTone(status: string | undefined) {
-  if (status === "strong") {
+function getCheckpointTone(status: CheckPointStatus) {
+  if (status === "green") {
     return {
-      badge: "Solida",
-      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
-      accentClassName: "from-emerald-500/10 via-emerald-500/5 to-transparent",
+      badge: "Verde",
+      badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      activeClassName: "bg-emerald-500",
     };
   }
-  if (status === "critical") {
+  if (status === "red") {
     return {
-      badge: "Critica",
-      className: "border-rose-200 bg-rose-50 text-rose-700",
-      accentClassName: "from-rose-500/10 via-rose-500/5 to-transparent",
-    };
-  }
-  return {
-    badge: "Da presidiare",
-    className: "border-amber-200 bg-amber-50 text-amber-700",
-    accentClassName: "from-amber-500/10 via-amber-500/5 to-transparent",
-  };
-}
-
-function getImpactAreaTone(impactArea: string | undefined) {
-  if (impactArea === "cash") {
-    return {
-      label: "Cassa",
-      className: "border-sky-200 bg-sky-50 text-sky-700",
-    };
-  }
-  if (impactArea === "margin") {
-    return {
-      label: "Margine",
-      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    };
-  }
-  if (impactArea === "risk") {
-    return {
-      label: "Rischio",
-      className: "border-rose-200 bg-rose-50 text-rose-700",
+      badge: "Rosso",
+      badgeClassName: "border-rose-200 bg-rose-50 text-rose-700",
+      activeClassName: "bg-rose-500",
     };
   }
   return {
-    label: "Crescita",
-    className: "border-violet-200 bg-violet-50 text-violet-700",
+    badge: "Arancione",
+    badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",
+    activeClassName: "bg-amber-500",
   };
 }
 
-function getUrgencyTone(urgency: string | undefined) {
-  if (urgency === "30d") {
-    return {
-      label: "30 giorni",
-      className: "border-rose-200 bg-rose-50 text-rose-700",
-    };
-  }
-  if (urgency === "180d") {
-    return {
-      label: "180 giorni",
-      className: "border-slate-200 bg-slate-50 text-slate-600",
-    };
-  }
-  return {
-    label: "90 giorni",
-    className: "border-amber-200 bg-amber-50 text-amber-700",
-  };
-}
-
-function mapRecommendationThemeToImpactArea(theme: unknown): CeoPriorityItem["impactArea"] {
-  if (theme === "margini_pricing") return "margin";
-  if (theme === "capitale_circolante" || theme === "allocazione_capitale") return "cash";
-  if (theme === "debito_struttura") return "risk";
+function mapRecommendationThemeToTrackKey(theme: unknown): CheckPointKey {
+  if (theme === "margini_pricing") return "profitability";
+  if (theme === "capitale_circolante" || theme === "allocazione_capitale") return "cashGeneration";
+  if (theme === "debito_struttura") return "debt";
   return "growth";
 }
 
-function mapRecommendationPriorityToUrgency(priority: unknown): CeoPriorityItem["urgency"] {
-  if (priority === "high") return "30d";
-  if (priority === "medium") return "90d";
-  return "180d";
+function mapRecommendationPriorityToStatus(priority: unknown): CheckPointStatus {
+  if (priority === "high") return "red";
+  if (priority === "medium") return "amber";
+  return "green";
 }
 
 function buildFallbackBusinessCeoBrief(recommendations: any[], workingCapitalDebt: any): CeoBriefData | null {
-  const normalizedRecommendations = Array.isArray(recommendations)
-    ? recommendations
-        .filter((item) => item && typeof item === "object")
-        .slice(0, 3)
-        .map((item, index) => ({
-          title: typeof item?.title === "string" && item.title.trim() ? item.title.trim() : `Priorita' ${index + 1}`,
-          action: typeof item?.description === "string" ? item.description.trim() : "",
-          whyItMatters: typeof item?.rationale === "string" ? item.rationale.trim() : "",
-          evidence: typeof item?.evidence === "string" ? item.evidence.trim() : "",
-          impactArea: mapRecommendationThemeToImpactArea(item?.theme),
-          urgency: mapRecommendationPriorityToUrgency(item?.priority),
-        }))
+  const recommendationList = Array.isArray(recommendations)
+    ? recommendations.filter((item) => item && typeof item === "object")
     : [];
 
-  if (normalizedRecommendations.length === 0) return null;
+  if (recommendationList.length === 0) return null;
 
-  const highPriorityCount = normalizedRecommendations.filter((item) => item.urgency === "30d").length;
-  const status: CeoBriefData["status"] = highPriorityCount >= 2 ? "critical" : highPriorityCount === 1 ? "watch" : "strong";
-  const headline =
-    status === "critical"
-      ? "Serve una correzione rapida: la priorita' e' recuperare controllo su cassa e execution."
-      : status === "watch"
-        ? "Il business regge, ma richiede priorita' nette su margine, cassa o rischio."
-        : "Il business appare ordinato, con alcune leve chiare per difendere il vantaggio.";
-  const verdictSource =
+  const firstByKey = new Map<CheckPointKey, any>();
+  for (const item of recommendationList) {
+    const key = mapRecommendationThemeToTrackKey(item?.theme);
+    if (!firstByKey.has(key)) firstByKey.set(key, item);
+  }
+
+  const fallbackSummary =
     typeof workingCapitalDebt?.summary === "string" && workingCapitalDebt.summary.trim()
       ? workingCapitalDebt.summary.trim()
-      : normalizedRecommendations[0]?.whyItMatters || "";
-  const watchouts = Array.isArray(workingCapitalDebt?.bullets) && workingCapitalDebt.bullets.length > 0
-    ? workingCapitalDebt.bullets.filter((item: unknown) => typeof item === "string" && item.trim()).slice(0, 3)
-    : normalizedRecommendations.map((item) => item.title).slice(0, 3);
+      : "I dati disponibili indicano leve manageriali concrete ma non una lettura completa di tutte le metriche.";
+  const firstBullet = Array.isArray(workingCapitalDebt?.bullets)
+    ? workingCapitalDebt.bullets.find((item: unknown) => typeof item === "string" && item.trim())
+    : null;
+
+  const checkpoints = CHECKPOINT_ORDER.map(({ key, label }) => {
+    const recommendation = firstByKey.get(key);
+    return {
+      key,
+      label,
+      status: mapRecommendationPriorityToStatus(recommendation?.priority),
+      metric: "Dati parziali",
+      judgment:
+        typeof recommendation?.title === "string" && recommendation.title.trim()
+          ? recommendation.title.trim()
+          : `${label}: servono numeri piu' strutturati per un giudizio netto.`,
+      evidence:
+        typeof recommendation?.evidence === "string" && recommendation.evidence.trim()
+          ? recommendation.evidence.trim()
+          : typeof firstBullet === "string" && firstBullet.trim()
+            ? firstBullet.trim()
+            : fallbackSummary,
+    };
+  });
+
+  const recommendationTracks = CHECKPOINT_ORDER.map(({ key, label }) => {
+    const recommendation = firstByKey.get(key);
+    return {
+      key,
+      label,
+      title:
+        typeof recommendation?.title === "string" && recommendation.title.trim()
+          ? recommendation.title.trim()
+          : `Priorita' su ${label.toLowerCase()}`,
+      diagnosis:
+        typeof recommendation?.rationale === "string" && recommendation.rationale.trim()
+          ? recommendation.rationale.trim()
+          : fallbackSummary,
+      action:
+        typeof recommendation?.description === "string" && recommendation.description.trim()
+          ? recommendation.description.trim()
+          : "Servono numeri piu' strutturati per dettagliare una leva operativa credibile.",
+      evidence:
+        typeof recommendation?.evidence === "string" && recommendation.evidence.trim()
+          ? recommendation.evidence.trim()
+          : typeof firstBullet === "string" && firstBullet.trim()
+            ? firstBullet.trim()
+            : fallbackSummary,
+    };
+  });
 
   return {
-    status,
-    headline,
-    verdict: verdictSource || "Le priorita' manageriali sono guidate dai numeri oggi disponibili.",
-    watchouts,
-    topPriorities: normalizedRecommendations,
+    overview: fallbackSummary,
+    checkpoints,
+    recommendationTracks,
   };
 }
 
@@ -514,50 +594,76 @@ function normalizeBusinessCeoBrief(raw: any, fallback: CeoBriefData | null): Ceo
   if ((!raw || typeof raw !== "object") && !fallback) return null;
 
   const source = raw && typeof raw === "object" ? raw : {};
-  const fallbackPriorities = fallback?.topPriorities || [];
-  const rawPriorities = Array.isArray(source.topPriorities) && source.topPriorities.length === 3
-    ? source.topPriorities
-    : fallbackPriorities;
-  const topPriorities = rawPriorities
-    .map((item: any, index: number) => ({
-      title: typeof item?.title === "string" && item.title.trim() ? item.title.trim() : fallbackPriorities[index]?.title || `Priorita' ${index + 1}`,
-      action: typeof item?.action === "string" && item.action.trim() ? item.action.trim() : fallbackPriorities[index]?.action || "",
-      whyItMatters:
-        typeof item?.whyItMatters === "string" && item.whyItMatters.trim()
-          ? item.whyItMatters.trim()
-          : fallbackPriorities[index]?.whyItMatters || "",
-      evidence: typeof item?.evidence === "string" && item.evidence.trim() ? item.evidence.trim() : fallbackPriorities[index]?.evidence || "",
-      impactArea:
-        item?.impactArea === "cash" || item?.impactArea === "margin" || item?.impactArea === "risk" || item?.impactArea === "growth"
-          ? item.impactArea
-          : fallbackPriorities[index]?.impactArea || "growth",
-      urgency:
-        item?.urgency === "30d" || item?.urgency === "90d" || item?.urgency === "180d"
-          ? item.urgency
-          : fallbackPriorities[index]?.urgency || "90d",
-    }))
-    .slice(0, 3);
+  const rawCheckpoints = source?.checkpoints && typeof source.checkpoints === "object" ? source.checkpoints : null;
+  const rawRecommendationTracks =
+    source?.recommendationTracks && typeof source.recommendationTracks === "object"
+      ? source.recommendationTracks
+      : null;
 
-  if (topPriorities.length === 0) return fallback;
+  if (!rawCheckpoints || !rawRecommendationTracks) return fallback;
 
-  const fallbackStatus = fallback?.status || "watch";
+  const checkpointItems = CHECKPOINT_ORDER.map(({ key, label }) => {
+    const fallbackItem = fallback?.checkpoints.find((item) => item.key === key);
+    const rawItem = rawCheckpoints[key] && typeof rawCheckpoints[key] === "object" ? rawCheckpoints[key] : {};
+
+    return {
+      key,
+      label,
+      status:
+        rawItem?.status === "green" || rawItem?.status === "amber" || rawItem?.status === "red"
+          ? rawItem.status
+          : fallbackItem?.status || "amber",
+      metric:
+        typeof rawItem?.metric === "string" && rawItem.metric.trim()
+          ? rawItem.metric.trim()
+          : fallbackItem?.metric || "Dati parziali",
+      judgment:
+        typeof rawItem?.judgment === "string" && rawItem.judgment.trim()
+          ? rawItem.judgment.trim()
+          : fallbackItem?.judgment || "",
+      evidence:
+        typeof rawItem?.evidence === "string" && rawItem.evidence.trim()
+          ? rawItem.evidence.trim()
+          : fallbackItem?.evidence || "",
+    };
+  });
+
+  const recommendationTrackItems = CHECKPOINT_ORDER.map(({ key, label }) => {
+    const fallbackItem = fallback?.recommendationTracks.find((item) => item.key === key);
+    const rawItem =
+      rawRecommendationTracks[key] && typeof rawRecommendationTracks[key] === "object"
+        ? rawRecommendationTracks[key]
+        : {};
+
+    return {
+      key,
+      label,
+      title:
+        typeof rawItem?.title === "string" && rawItem.title.trim()
+          ? rawItem.title.trim()
+          : fallbackItem?.title || `Priorita' su ${label.toLowerCase()}`,
+      diagnosis:
+        typeof rawItem?.diagnosis === "string" && rawItem.diagnosis.trim()
+          ? rawItem.diagnosis.trim()
+          : fallbackItem?.diagnosis || "",
+      action:
+        typeof rawItem?.action === "string" && rawItem.action.trim()
+          ? rawItem.action.trim()
+          : fallbackItem?.action || "",
+      evidence:
+        typeof rawItem?.evidence === "string" && rawItem.evidence.trim()
+          ? rawItem.evidence.trim()
+          : fallbackItem?.evidence || "",
+    };
+  });
+
   return {
-    status:
-      source?.status === "strong" || source?.status === "watch" || source?.status === "critical"
-        ? source.status
-        : fallbackStatus,
-    headline:
-      typeof source?.headline === "string" && source.headline.trim()
-        ? source.headline.trim()
-        : fallback?.headline || topPriorities[0]?.title || "CEO Brief",
-    verdict:
-      typeof source?.verdict === "string" && source.verdict.trim()
-        ? source.verdict.trim()
-        : fallback?.verdict || "",
-    watchouts: Array.isArray(source?.watchouts) && source.watchouts.length > 0
-      ? source.watchouts.filter((item: unknown) => typeof item === "string" && item.trim()).slice(0, 3)
-      : fallback?.watchouts || [],
-    topPriorities,
+    overview:
+      typeof source?.overview === "string" && source.overview.trim()
+        ? source.overview.trim()
+        : fallback?.overview || "",
+    checkpoints: checkpointItems,
+    recommendationTracks: recommendationTrackItems,
   };
 }
 
@@ -707,100 +813,110 @@ function FinancialTableCard({
   );
 }
 
-function BusinessCeoBriefCard({ ceoBrief }: { ceoBrief: CeoBriefData }) {
-  const tone = getCeoBriefTone(ceoBrief.status);
+function HorizontalTrafficLight({ status }: { status: CheckPointStatus }) {
+  const dotColors = ["bg-emerald-500", "bg-amber-500", "bg-rose-500"];
+  const activeIndex = status === "green" ? 0 : status === "amber" ? 1 : 2;
 
   return (
-    <Card data-testid="section-ceo-brief" className="overflow-hidden border-border/70">
-      <CardHeader className={`relative gap-4 bg-gradient-to-br ${tone.accentClassName}`}>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${tone.className}`}>
-                {tone.badge}
-              </span>
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                <Lightbulb className="h-3.5 w-3.5" />
-                CEO Brief
-              </span>
-            </div>
-            <div>
-              <CardTitle className="text-2xl leading-tight text-foreground sm:text-3xl">
-                {ceoBrief.headline}
-              </CardTitle>
-              {ceoBrief.verdict && (
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/80">
-                  {ceoBrief.verdict}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6 pt-6">
-        {ceoBrief.watchouts.length > 0 && (
-          <div className="grid gap-3 sm:grid-cols-3">
-            {ceoBrief.watchouts.map((item, index) => (
-              <div
-                key={`${item}-${index}`}
-                className="rounded-2xl border border-border/60 bg-slate-50/70 px-4 py-4"
-              >
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                  Watchout {index + 1}
-                </div>
-                <p className="mt-2 text-sm leading-6 text-foreground/85">{item}</p>
-              </div>
-            ))}
-          </div>
+    <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-white/90 px-3 py-2 shadow-sm">
+      {dotColors.map((dotClassName, index) => (
+        <span
+          key={`${status}-${index}`}
+          className={`h-3.5 w-3.5 rounded-full ${index === activeIndex ? dotClassName : "bg-slate-200"}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function BusinessCheckPointCard({ ceoBrief }: { ceoBrief: CeoBriefData }) {
+  return (
+    <Card data-testid="section-check-point" className="overflow-hidden border-border/70">
+      <CardHeader className="gap-3 border-b border-border/60 bg-slate-50/80">
+        <CardTitle className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+          Check Point
+        </CardTitle>
+        {ceoBrief.overview && (
+          <p className="max-w-3xl text-sm leading-6 text-foreground/85">{ceoBrief.overview}</p>
         )}
+      </CardHeader>
+      <CardContent className="space-y-4 pt-6">
+        {ceoBrief.checkpoints.map((item) => {
+          const tone = getCheckpointTone(item.status);
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          {ceoBrief.topPriorities.map((priority, index) => {
-            const impactTone = getImpactAreaTone(priority.impactArea);
-            const urgencyTone = getUrgencyTone(priority.urgency);
-
-            return (
-              <div
-                key={`${priority.title}-${index}`}
-                className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm"
-              >
+          return (
+            <div
+              key={item.key}
+              className="grid gap-4 rounded-3xl border border-border/70 bg-card px-5 py-5 md:grid-cols-[minmax(0,1fr)_160px] md:items-center"
+            >
+              <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                    {index + 1}
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    {item.label}
                   </span>
-                  <span className={`rounded-full border px-3 py-1 text-[11px] font-medium ${impactTone.className}`}>
-                    {impactTone.label}
-                  </span>
-                  <span className={`rounded-full border px-3 py-1 text-[11px] font-medium ${urgencyTone.className}`}>
-                    {urgencyTone.label}
+                  <span className="rounded-full border border-border/60 px-3 py-1 text-[11px] font-medium text-foreground/80">
+                    {item.metric}
                   </span>
                 </div>
-                <div className="mt-4 text-lg font-semibold leading-snug text-foreground">
-                  {priority.title}
+                <p className="mt-3 text-base font-semibold leading-7 text-foreground">
+                  {item.judgment}
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.evidence}</p>
+              </div>
+              <div className="flex flex-col items-start gap-3 md:items-end">
+                <HorizontalTrafficLight status={item.status} />
+                <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${tone.badgeClassName}`}>
+                  {tone.badge}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
+function BusinessRecommendationsCard({ ceoBrief }: { ceoBrief: CeoBriefData }) {
+  return (
+    <Card data-testid="section-business-recommendations" className="border-border/70">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+          Raccomandazioni
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-4 md:grid-cols-2">
+          {ceoBrief.recommendationTracks.map((item) => (
+            <div key={item.key} className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                {item.label}
+              </div>
+              <div className="mt-3 text-lg font-semibold leading-snug text-foreground">
+                {item.title}
+              </div>
+              <div className="mt-4 space-y-4">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Insight
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-foreground/85">{item.diagnosis}</p>
                 </div>
-                <div className="mt-4 space-y-4">
-                  <div>
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Cosa fare
-                    </div>
-                    <p className="mt-1 text-sm leading-6 text-foreground/85">{priority.action}</p>
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Cosa fare
                   </div>
-                  <div>
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Perche' conta
-                    </div>
-                    <p className="mt-1 text-sm leading-6 text-foreground/80">{priority.whyItMatters}</p>
+                  <p className="mt-1 text-sm leading-6 text-foreground/85">{item.action}</p>
+                </div>
+                <div className="rounded-2xl border border-border/60 bg-slate-50/70 px-4 py-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Evidenza
                   </div>
-                  <div className="rounded-2xl border border-border/60 bg-slate-50/70 px-4 py-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Evidenza
-                    </div>
-                    <p className="mt-1 text-xs leading-5 text-foreground/80">{priority.evidence}</p>
-                  </div>
+                  <p className="mt-1 text-xs leading-5 text-foreground/80">{item.evidence}</p>
                 </div>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>
@@ -1814,10 +1930,6 @@ export default function ResultsPage() {
       {/* Content */}
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
-        {isBusinessMode && businessCeoBrief && (
-          <BusinessCeoBriefCard ceoBrief={businessCeoBrief} />
-        )}
-
         {/* ANAGRAFICA */}
         <Card data-testid="section-anagrafica">
           <CardHeader className="pb-3">
@@ -1897,13 +2009,14 @@ export default function ResultsPage() {
           </CardContent>
         </Card>
 
-        {isBusinessMode ? (
-          <BusinessSnapshotCard
-            descriptionText={descriptionText}
-            aiDescriptionSources={aiDescriptionSources}
-            keyProducts={aiKeyProducts}
-          />
-        ) : descriptionText ? (
+        {isBusinessMode && businessCeoBrief && (
+          <>
+            <BusinessCheckPointCard ceoBrief={businessCeoBrief} />
+            <BusinessRecommendationsCard ceoBrief={businessCeoBrief} />
+          </>
+        )}
+
+        {!isBusinessMode && descriptionText ? (
           <Card data-testid="section-descrizione">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2096,6 +2209,14 @@ export default function ResultsPage() {
             years={activeChartData?.years || []}
             rows={debtTableRows}
             testId="section-debt"
+          />
+        )}
+
+        {isBusinessMode && (
+          <BusinessSnapshotCard
+            descriptionText={descriptionText}
+            aiDescriptionSources={aiDescriptionSources}
+            keyProducts={aiKeyProducts}
           />
         )}
 

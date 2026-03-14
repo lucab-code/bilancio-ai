@@ -585,43 +585,111 @@ const CEO_BRIEF_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    status: {
-      type: "string",
-      enum: ["strong", "watch", "critical"],
-    },
-    headline: { type: "string" },
-    verdict: { type: "string" },
-    watchouts: {
-      type: "array",
-      maxItems: 3,
-      items: { type: "string" },
-    },
-    topPriorities: {
-      type: "array",
-      minItems: 3,
-      maxItems: 3,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          title: { type: "string" },
-          action: { type: "string" },
-          whyItMatters: { type: "string" },
-          evidence: { type: "string" },
-          impactArea: {
-            type: "string",
-            enum: ["cash", "margin", "risk", "growth"],
+    overview: { type: "string" },
+    checkpoints: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        growth: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            status: { type: "string", enum: ["green", "amber", "red"] },
+            metric: { type: "string" },
+            judgment: { type: "string" },
+            evidence: { type: "string" },
           },
-          urgency: {
-            type: "string",
-            enum: ["30d", "90d", "180d"],
-          },
+          required: ["status", "metric", "judgment", "evidence"],
         },
-        required: ["title", "action", "whyItMatters", "evidence", "impactArea", "urgency"],
+        profitability: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            status: { type: "string", enum: ["green", "amber", "red"] },
+            metric: { type: "string" },
+            judgment: { type: "string" },
+            evidence: { type: "string" },
+          },
+          required: ["status", "metric", "judgment", "evidence"],
+        },
+        cashGeneration: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            status: { type: "string", enum: ["green", "amber", "red"] },
+            metric: { type: "string" },
+            judgment: { type: "string" },
+            evidence: { type: "string" },
+          },
+          required: ["status", "metric", "judgment", "evidence"],
+        },
+        debt: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            status: { type: "string", enum: ["green", "amber", "red"] },
+            metric: { type: "string" },
+            judgment: { type: "string" },
+            evidence: { type: "string" },
+          },
+          required: ["status", "metric", "judgment", "evidence"],
+        },
       },
+      required: ["growth", "profitability", "cashGeneration", "debt"],
+    },
+    recommendationTracks: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        growth: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            diagnosis: { type: "string" },
+            action: { type: "string" },
+            evidence: { type: "string" },
+          },
+          required: ["title", "diagnosis", "action", "evidence"],
+        },
+        profitability: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            diagnosis: { type: "string" },
+            action: { type: "string" },
+            evidence: { type: "string" },
+          },
+          required: ["title", "diagnosis", "action", "evidence"],
+        },
+        cashGeneration: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            diagnosis: { type: "string" },
+            action: { type: "string" },
+            evidence: { type: "string" },
+          },
+          required: ["title", "diagnosis", "action", "evidence"],
+        },
+        debt: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            diagnosis: { type: "string" },
+            action: { type: "string" },
+            evidence: { type: "string" },
+          },
+          required: ["title", "diagnosis", "action", "evidence"],
+        },
+      },
+      required: ["growth", "profitability", "cashGeneration", "debt"],
     },
   },
-  required: ["status", "headline", "verdict", "watchouts", "topPriorities"],
+  required: ["overview", "checkpoints", "recommendationTracks"],
 } as const;
 
 const COMPANY_DESCRIPTION_SCHEMA = {
@@ -2104,19 +2172,6 @@ function getLatestFinancialSnapshot(financialData: any) {
   };
 }
 
-function mapRecommendationThemeToImpactArea(theme: unknown): "cash" | "margin" | "risk" | "growth" {
-  if (theme === "margini_pricing") return "margin";
-  if (theme === "capitale_circolante" || theme === "allocazione_capitale") return "cash";
-  if (theme === "debito_struttura") return "risk";
-  return "growth";
-}
-
-function mapRecommendationPriorityToUrgency(priority: unknown): "30d" | "90d" | "180d" {
-  if (priority === "high") return "30d";
-  if (priority === "medium") return "90d";
-  return "180d";
-}
-
 function calculatePerEmployeeMetric(value: unknown, employees: unknown): number | null {
   if (!isFiniteNumber(value) || !isFiniteNumber(employees) || employees <= 0) return null;
   return Number((value / employees).toFixed(0));
@@ -2175,6 +2230,32 @@ function inferFallbackCeoStatus(snapshot: ReturnType<typeof getLatestFinancialSn
   return "strong";
 }
 
+function formatPctMetric(value: unknown) {
+  return isFiniteNumber(value) ? `${value.toFixed(1)}%` : "N/D";
+}
+
+function formatMultipleMetric(value: unknown) {
+  return isFiniteNumber(value) ? `${value.toFixed(1)}x` : "N/D";
+}
+
+function formatCurrencyPerEmployeeMetric(value: unknown) {
+  if (!isFiniteNumber(value)) return "N/D";
+  if (Math.abs(value) >= 1_000_000) return `€${(value / 1_000_000).toFixed(1)}m`;
+  if (Math.abs(value) >= 1_000) return `€${(value / 1_000).toFixed(0)}k`;
+  return `€${value.toFixed(0)}`;
+}
+
+function getSignalStatus(
+  value: number | null,
+  greenTest: (candidate: number) => boolean,
+  amberTest: (candidate: number) => boolean,
+): "green" | "amber" | "red" {
+  if (!isFiniteNumber(value)) return "amber";
+  if (greenTest(value)) return "green";
+  if (amberTest(value)) return "amber";
+  return "red";
+}
+
 function buildFallbackCeoBrief(
   financialData: any,
   workingCapitalDebt: { summary: string; bullets: string[] },
@@ -2189,57 +2270,165 @@ function buildFallbackCeoBrief(
 ) {
   const snapshot = getLatestFinancialSnapshot(financialData);
   const latestYear = snapshot.latestYear || "ultimo anno disponibile";
+  const latest = snapshot.latest;
   const status = inferFallbackCeoStatus(snapshot);
-  const metricSignals: string[] = [];
-
-  if (isFiniteNumber(snapshot.metrics.ebitdaMargin)) {
-    metricSignals.push(`EBITDA margin ${latestYear} ${snapshot.metrics.ebitdaMargin.toFixed(1)}%`);
-  }
-  if (isFiniteNumber(snapshot.metrics.cashConversion)) {
-    metricSignals.push(`cash conversion ${latestYear} ${snapshot.metrics.cashConversion.toFixed(1)}%`);
-  }
-  if (isFiniteNumber(snapshot.metrics.netDebtEbitda)) {
-    metricSignals.push(`debito netto / EBITDA ${latestYear} ${snapshot.metrics.netDebtEbitda.toFixed(1)}x`);
-  }
-  if (isFiniteNumber(snapshot.metrics.revenueGrowth)) {
-    metricSignals.push(`crescita ricavi ${latestYear} ${snapshot.metrics.revenueGrowth.toFixed(1)}%`);
-  }
-
-  const metricSummary = metricSignals.length > 0
-    ? metricSignals.slice(0, 3).join(", ")
-    : `i dati ${latestYear} sono parziali ma sufficienti per isolare le priorita' operative`;
-
-  const headline =
+  const revenuePerEmployee = calculatePerEmployeeMetric(latest?.fatturato, latest?.dipendenti);
+  const personnelCostPctRevenue = calculatePercentage(latest?.costo_personale, latest?.fatturato);
+  const taxesPctEbitda = calculatePercentage(latest?.taxes, latest?.ebitda);
+  const capexPctRevenue = calculatePercentage(latest?.capex, latest?.fatturato);
+  const changeNwcPctRevenue = calculatePercentage(latest?.change_nwc, latest?.fatturato);
+  const primaryCashLeak = getPrimaryCashLeak(latest);
+  const benchmarkSummary = Array.isArray(workingCapitalDebt?.bullets) ? workingCapitalDebt.bullets[0] : null;
+  const overview =
     status === "critical"
-      ? "Business sotto pressione: serve una correzione rapida su cassa e struttura."
+      ? `Nel ${latestYear} il business va riportato sotto controllo: oggi crescita, profittabilita', cassa e leva non stanno lavorando insieme per generare cassa.`
       : status === "watch"
-        ? "Business da presidiare: la crescita va difesa liberando cassa e margine."
-        : "Business complessivamente solido, con priorita' chiare per proteggere il vantaggio.";
+        ? `Nel ${latestYear} l'azienda ha basi utili, ma il motore di generazione di cassa va gestito con piu' disciplina su crescita, margine, conversione e debito.`
+        : `Nel ${latestYear} il business appare ordinato; la priorita' resta proteggere la cassa mantenendo disciplina su crescita, profittabilita' e leva.`;
 
-  const verdict =
-    status === "critical"
-      ? `Nel ${latestYear} il punto non e' inseguire nuova crescita, ma riprendere controllo su marginalita', cassa e leva. ${metricSummary}.`
-      : status === "watch"
-        ? `Nel ${latestYear} il business mostra basi utilizzabili, ma non abbastanza robuste da lasciare la gestione in automatico. ${metricSummary}.`
-        : `Nel ${latestYear} l'azienda mostra fondamentali complessivamente tenibili; il valore si difende mantenendo disciplina su allocazione del capitale e qualita' della crescita. ${metricSummary}.`;
+  const growthStatus = getSignalStatus(
+    snapshot.metrics.revenueGrowth,
+    (value) => value >= 10,
+    (value) => value >= 0,
+  );
+  const profitabilityStatus = getSignalStatus(
+    snapshot.metrics.ebitdaMargin,
+    (value) => value >= 15,
+    (value) => value >= 8,
+  );
+  const cashStatus = getSignalStatus(
+    snapshot.metrics.cashConversion,
+    (value) => value >= 80,
+    (value) => value >= 50,
+  );
+  const debtStatus = getSignalStatus(
+    snapshot.metrics.netDebtEbitda,
+    (value) => value <= 2,
+    (value) => value <= 4,
+  );
 
-  const watchouts = Array.isArray(workingCapitalDebt?.bullets) && workingCapitalDebt.bullets.length > 0
-    ? workingCapitalDebt.bullets.slice(0, 3)
-    : recommendations.slice(0, 3).map((item) => item.title);
+  const pickRecommendation = (...themes: string[]) =>
+    recommendations.find((item) => themes.includes(String(item?.theme || "")));
+
+  const growthRecommendation = pickRecommendation("crescita_posizionamento");
+  const profitabilityRecommendation = pickRecommendation("margini_pricing");
+  const cashRecommendation = pickRecommendation("capitale_circolante", "allocazione_capitale");
+  const capitalDisciplineRecommendation = pickRecommendation("allocazione_capitale");
+  const debtRecommendation = pickRecommendation("debito_struttura");
 
   return {
-    status,
-    headline,
-    verdict,
-    watchouts,
-    topPriorities: recommendations.slice(0, 3).map((item) => ({
-      title: item.title,
-      action: item.description,
-      whyItMatters: item.rationale,
-      evidence: item.evidence,
-      impactArea: mapRecommendationThemeToImpactArea(item.theme),
-      urgency: mapRecommendationPriorityToUrgency(item.priority),
-    })),
+    overview,
+    checkpoints: {
+      growth: {
+        status: growthStatus,
+        metric: `Ricavi ${latestYear} ${formatPctMetric(snapshot.metrics.revenueGrowth)}`,
+        judgment:
+          growthStatus === "green"
+            ? "La crescita recente e' abbastanza forte; il punto adesso e' difenderne la qualita'."
+            : growthStatus === "amber"
+              ? "La crescita c'e', ma non e' ancora abbastanza robusta da considerarla un vantaggio strutturale."
+              : "La crescita e' insufficiente o negativa: prima di cercare volume va chiarita la qualita' dei ricavi.",
+        evidence: `Crescita ricavi ${latestYear}: ${formatPctMetric(snapshot.metrics.revenueGrowth)}; EBITDA margin ${latestYear}: ${formatPctMetric(snapshot.metrics.ebitdaMargin)}.${benchmarkSummary ? ` ${benchmarkSummary}` : ""}`,
+      },
+      profitability: {
+        status: profitabilityStatus,
+        metric: `EBITDA margin ${latestYear} ${formatPctMetric(snapshot.metrics.ebitdaMargin)}`,
+        judgment:
+          profitabilityStatus === "green"
+            ? "La profittabilita' e' buona, ma va difesa con pricing e disciplina sulla produttivita'."
+            : profitabilityStatus === "amber"
+              ? "Il margine e' discreto ma non ancora abbastanza forte per assorbire errori di execution o crescita debole."
+              : "La profittabilita' e' troppo compressa: cost base e produttivita' vanno attaccate in modo esplicito.",
+        evidence: `EBITDA margin ${latestYear}: ${formatPctMetric(snapshot.metrics.ebitdaMargin)}; costo del personale / ricavi ${latestYear}: ${formatPctMetric(personnelCostPctRevenue)}; ricavi per dipendente ${latestYear}: ${formatCurrencyPerEmployeeMetric(revenuePerEmployee)}.`,
+      },
+      cashGeneration: {
+        status: cashStatus,
+        metric: `Cash conversion ${latestYear} ${formatPctMetric(snapshot.metrics.cashConversion)}`,
+        judgment:
+          cashStatus === "green"
+            ? "La generazione di cassa appare ordinata, ma va preservata tenendo sotto disciplina circolante, capex e imposte."
+            : cashStatus === "amber"
+              ? "La cassa viene prodotta solo in parte: c'e' dispersione tra EBITDA e UFCF che va resa visibile e corretta."
+              : "La cash conversion e' debole: oggi l'EBITDA non si sta trasformando in cassa in modo soddisfacente.",
+        evidence: `Cash conversion ${latestYear}: ${formatPctMetric(snapshot.metrics.cashConversion)}; change NWC / ricavi ${latestYear}: ${formatPctMetric(changeNwcPctRevenue)}; capex / ricavi ${latestYear}: ${formatPctMetric(capexPctRevenue)}; taxes / EBITDA ${latestYear}: ${formatPctMetric(taxesPctEbitda)}.${primaryCashLeak ? ` Perdita principale su ${primaryCashLeak.label}.` : ""}`,
+      },
+      debt: {
+        status: debtStatus,
+        metric: `Net debt / EBITDA ${latestYear} ${formatMultipleMetric(snapshot.metrics.netDebtEbitda)}`,
+        judgment:
+          debtStatus === "green"
+            ? "L'indebitamento appare gestibile e lascia spazio di manovra, finche' la cassa resta disciplinata."
+            : debtStatus === "amber"
+              ? "La leva va presidiata: non e' ancora fuori scala, ma restringe la tolleranza a margini o cash conversion deboli."
+              : "L'indebitamento e' alto rispetto all'EBITDA e amplifica ogni debolezza operativa del business.",
+        evidence: `Debito netto / EBITDA ${latestYear}: ${formatMultipleMetric(snapshot.metrics.netDebtEbitda)}; Debt / Equity ${latestYear}: ${formatMultipleMetric(snapshot.metrics.debtEquity)}; cash conversion ${latestYear}: ${formatPctMetric(snapshot.metrics.cashConversion)}.`,
+      },
+    },
+    recommendationTracks: {
+      growth: {
+        title: growthRecommendation?.title || "Riallocare la crescita verso ricavi che portano cassa",
+        diagnosis:
+          growthRecommendation?.rationale ||
+          `La crescita va letta insieme a margine e cash conversion: se i ricavi non difendono prezzo, mix e circolante, aumentano il fabbisogno piu' del valore creato.`,
+        action:
+          growthRecommendation?.description ||
+          "Concentra lo sforzo commerciale su clienti, linee e canali che tengono pricing e assorbimento di circolante sotto controllo; ferma la crescita che porta solo volume.",
+        evidence:
+          growthRecommendation?.evidence ||
+          `Crescita ricavi ${latestYear}: ${formatPctMetric(snapshot.metrics.revenueGrowth)}; cash conversion ${latestYear}: ${formatPctMetric(snapshot.metrics.cashConversion)}.`,
+      },
+      profitability: {
+        title: profitabilityRecommendation?.title || "Alzare la profittabilita' partendo da cost base e produttivita'",
+        diagnosis:
+          profitabilityRecommendation?.rationale ||
+          `Se il margine non sale, la crescita genera troppo poco EBITDA addizionale. Qui vanno guardati pricing, costo del personale, produttivita' e ricavi per dipendente.`,
+        action:
+          profitabilityRecommendation?.description ||
+          "Verifica se il recupero viene da repricing, mix, automazione, AI, outsourcing o riduzione selettiva dell'organico dove la produttivita' non giustifica la struttura.",
+        evidence:
+          profitabilityRecommendation?.evidence ||
+          `EBITDA margin ${latestYear}: ${formatPctMetric(snapshot.metrics.ebitdaMargin)}; costo del personale / ricavi ${latestYear}: ${formatPctMetric(personnelCostPctRevenue)}; ricavi per dipendente ${latestYear}: ${formatCurrencyPerEmployeeMetric(revenuePerEmployee)}.`,
+      },
+      cashGeneration: {
+        title: cashRecommendation?.title || "Riprendere controllo della generazione di cassa",
+        diagnosis:
+          [
+            cashRecommendation?.rationale,
+            capitalDisciplineRecommendation && capitalDisciplineRecommendation !== cashRecommendation
+              ? capitalDisciplineRecommendation.rationale
+              : null,
+          ]
+            .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+            .join(" ") ||
+          `La dispersione di cassa va scomposta: capitale circolante, capex e imposte hanno impatti diversi e vanno gestiti con ownership e target separati.`,
+        action:
+          [
+            cashRecommendation?.description,
+            capitalDisciplineRecommendation && capitalDisciplineRecommendation !== cashRecommendation
+              ? capitalDisciplineRecommendation.description
+              : null,
+          ]
+            .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+            .join(" ") ||
+          "Intervieni dove la cassa si perde davvero: rilascio circolante se il problema sono crediti/scorte, modelli piu' asset-light se il problema e' il capex, review fiscale specialistica se il tax cash-out pesa troppo.",
+        evidence:
+          cashRecommendation?.evidence ||
+          capitalDisciplineRecommendation?.evidence ||
+          `Cash conversion ${latestYear}: ${formatPctMetric(snapshot.metrics.cashConversion)}; UFCF ${latestYear}: ${isFiniteNumber(latest?.unlevered_free_cash_flow) ? `${(latest.unlevered_free_cash_flow / 1_000_000).toFixed(1)}m` : "N/D"}; change NWC / ricavi ${latestYear}: ${formatPctMetric(changeNwcPctRevenue)}.`,
+      },
+      debt: {
+        title: debtRecommendation?.title || "Impedire che la leva peggiori un problema operativo",
+        diagnosis:
+          debtRecommendation?.rationale ||
+          `Il debito non e' il driver della performance, ma quando margine e cash conversion non sono abbastanza forti riduce flessibilita', headroom e potere negoziale.`,
+        action:
+          debtRecommendation?.description ||
+          "Prima difendi cassa e margine, poi riapri il tema della crescita finanziata; evita di usare nuova leva per coprire inefficienze operative che il business non sta assorbendo.",
+        evidence:
+          debtRecommendation?.evidence ||
+          `Debito netto / EBITDA ${latestYear}: ${formatMultipleMetric(snapshot.metrics.netDebtEbitda)}; cash conversion ${latestYear}: ${formatPctMetric(snapshot.metrics.cashConversion)}.`,
+      },
+    },
   };
 }
 
@@ -2911,38 +3100,92 @@ async function generateBusinessCeoBrief(
     if (!context.latestYear) return fallback;
 
     const result = await createStructuredResponse<{
-      status: "strong" | "watch" | "critical";
-      headline: string;
-      verdict: string;
-      watchouts: string[];
-      topPriorities: Array<{
-        title: string;
-        action: string;
-        whyItMatters: string;
-        evidence: string;
-        impactArea: "cash" | "margin" | "risk" | "growth";
-        urgency: "30d" | "90d" | "180d";
-      }>;
+      overview: string;
+      checkpoints: {
+        growth: {
+          status: "green" | "amber" | "red";
+          metric: string;
+          judgment: string;
+          evidence: string;
+        };
+        profitability: {
+          status: "green" | "amber" | "red";
+          metric: string;
+          judgment: string;
+          evidence: string;
+        };
+        cashGeneration: {
+          status: "green" | "amber" | "red";
+          metric: string;
+          judgment: string;
+          evidence: string;
+        };
+        debt: {
+          status: "green" | "amber" | "red";
+          metric: string;
+          judgment: string;
+          evidence: string;
+        };
+      };
+      recommendationTracks: {
+        growth: {
+          title: string;
+          diagnosis: string;
+          action: string;
+          evidence: string;
+        };
+        profitability: {
+          title: string;
+          diagnosis: string;
+          action: string;
+          evidence: string;
+        };
+        cashGeneration: {
+          title: string;
+          diagnosis: string;
+          action: string;
+          evidence: string;
+        };
+        debt: {
+          title: string;
+          diagnosis: string;
+          action: string;
+          evidence: string;
+        };
+      };
     }>({
       apiKey,
       model: getOpenaiChatModel(),
       instructions: `Sei un advisor senior che prepara la prima pagina di lettura per CEO/fondatore di una PMI italiana.
-Il tuo output deve essere il brief iniziale che il CEO legge in 30 secondi prima di entrare nel dettaglio.
+Il tuo output deve essere un "Check Point" imprenditoriale con quattro giudizi netti e quattro raccomandazioni serie, non un riassunto di bilancio.
 Regole:
 - scrivi per CEO/fondatore, non per analista bancario
-- devi prendere posizione con un giudizio netto sul business
-- devi leggere il business attraverso tre leve: crescita, EBITDA margin e cash conversion
-- le priorita' devono scendere da una o piu' di queste tre leve, non da osservazioni laterali
+- devi leggere il business attraverso quattro assi: crescita, profittabilita', generazione di cassa e indebitamento
+- crescita = andamento dei ricavi e qualita' della crescita
+- profittabilita' = EBITDA margin, pricing, cost base, costo del personale, ricavi per dipendente, produttivita'
+- generazione di cassa = cash conversion e perdita di cassa su circolante, capex, imposte, UFCF
+- indebitamento = debito netto / EBITDA, flessibilita' finanziaria e rischio
 - usa numeri e anni specifici quando disponibili
 - niente riassunti scolastici del bilancio, niente meta-commenti sulle fonti, niente linguaggio generico
-- "watchouts" deve contenere massimo 3 punti brevi e rilevanti
-- "topPriorities" deve contenere esattamente 3 priorita', chiaramente diverse tra loro
-- ogni priorita' deve essere orientata a decisione e azione nei prossimi 30/90/180 giorni
-- "action" = cosa fare concretamente
-- "whyItMatters" = perche' conta in termini di cassa, margine, rischio o crescita
-- "evidence" = prova numerica con anno, gap o metrica disponibile
-- se il problema e' il margine, valuta esplicitamente pricing, costi, produttivita', ricavi per dipendente, AI, outsourcing o organico quando i numeri lo giustificano
-- se il problema e' la cash conversion, spiega se la perdita di cassa viene da capitale circolante, capex o imposte
+- "overview" = 1-2 frasi secche sul motore di generazione di cassa
+- "checkpoints" deve contenere obbligatoriamente growth, profitability, cashGeneration, debt
+- per ogni checkpoint:
+  - "status" deve essere green, amber o red
+  - "metric" deve essere una statistica breve con numero e anno, massimo 8 parole
+  - "judgment" deve essere un giudizio netto e leggibile da imprenditore
+  - "evidence" deve spiegare i numeri che supportano il giudizio
+- "recommendationTracks" deve contenere obbligatoriamente growth, profitability, cashGeneration, debt
+- per ogni recommendationTrack:
+  - "title" = titolo secco, orientato a decisione
+  - "diagnosis" = analisi seria della situazione, non banalita'
+  - "action" = cosa fare concretamente nei prossimi trimestri
+  - "evidence" = prova numerica con anno, gap o metrica disponibile
+- le quattro raccomandazioni devono essere davvero distinte tra loro
+- sulla crescita devi dire come aumentarla senza peggiorare la cassa
+- sulla profittabilita' devi essere esplicito su pricing, costi, produttivita', AI, outsourcing o organico se i numeri lo giustificano
+- sulla generazione di cassa devi dire dove si perde la cassa: circolante, capex, imposte o mix di questi
+- sull'indebitamento devi spiegare se la leva e' un rischio o un vantaggio tattico
+- se i benchmark esistono, usali per spiegare dove l'azienda e' sopra o sotto il mercato
 - se i dati sono incompleti, resta prudente ma utile; non lasciare campi vuoti`,
       input: [{
         role: "user",
@@ -2970,28 +3213,163 @@ Regole:
     });
 
     return {
-      status: result?.status || fallback.status,
-      headline: typeof result?.headline === "string" && result.headline.trim() ? result.headline.trim() : fallback.headline,
-      verdict: typeof result?.verdict === "string" && result.verdict.trim() ? result.verdict.trim() : fallback.verdict,
-      watchouts: Array.isArray(result?.watchouts) && result.watchouts.length > 0
-        ? result.watchouts.map((item) => String(item).trim()).filter(Boolean).slice(0, 3)
-        : fallback.watchouts,
-      topPriorities: Array.isArray(result?.topPriorities) && result.topPriorities.length === 3
-        ? result.topPriorities.map((item, index) => ({
-            title: typeof item?.title === "string" && item.title.trim() ? item.title.trim() : fallback.topPriorities[index]?.title || `Priorita' ${index + 1}`,
-            action: typeof item?.action === "string" && item.action.trim() ? item.action.trim() : fallback.topPriorities[index]?.action || "",
-            whyItMatters: typeof item?.whyItMatters === "string" && item.whyItMatters.trim() ? item.whyItMatters.trim() : fallback.topPriorities[index]?.whyItMatters || "",
-            evidence: typeof item?.evidence === "string" && item.evidence.trim() ? item.evidence.trim() : fallback.topPriorities[index]?.evidence || "",
-            impactArea:
-              item?.impactArea === "cash" || item?.impactArea === "margin" || item?.impactArea === "risk" || item?.impactArea === "growth"
-                ? item.impactArea
-                : fallback.topPriorities[index]?.impactArea || "growth",
-            urgency:
-              item?.urgency === "30d" || item?.urgency === "90d" || item?.urgency === "180d"
-                ? item.urgency
-                : fallback.topPriorities[index]?.urgency || "90d",
-          }))
-        : fallback.topPriorities,
+      overview: typeof result?.overview === "string" && result.overview.trim() ? result.overview.trim() : fallback.overview,
+      checkpoints: {
+        growth: {
+          status:
+            result?.checkpoints?.growth?.status === "green" ||
+            result?.checkpoints?.growth?.status === "amber" ||
+            result?.checkpoints?.growth?.status === "red"
+              ? result.checkpoints.growth.status
+              : fallback.checkpoints.growth.status,
+          metric:
+            typeof result?.checkpoints?.growth?.metric === "string" && result.checkpoints.growth.metric.trim()
+              ? result.checkpoints.growth.metric.trim()
+              : fallback.checkpoints.growth.metric,
+          judgment:
+            typeof result?.checkpoints?.growth?.judgment === "string" && result.checkpoints.growth.judgment.trim()
+              ? result.checkpoints.growth.judgment.trim()
+              : fallback.checkpoints.growth.judgment,
+          evidence:
+            typeof result?.checkpoints?.growth?.evidence === "string" && result.checkpoints.growth.evidence.trim()
+              ? result.checkpoints.growth.evidence.trim()
+              : fallback.checkpoints.growth.evidence,
+        },
+        profitability: {
+          status:
+            result?.checkpoints?.profitability?.status === "green" ||
+            result?.checkpoints?.profitability?.status === "amber" ||
+            result?.checkpoints?.profitability?.status === "red"
+              ? result.checkpoints.profitability.status
+              : fallback.checkpoints.profitability.status,
+          metric:
+            typeof result?.checkpoints?.profitability?.metric === "string" && result.checkpoints.profitability.metric.trim()
+              ? result.checkpoints.profitability.metric.trim()
+              : fallback.checkpoints.profitability.metric,
+          judgment:
+            typeof result?.checkpoints?.profitability?.judgment === "string" && result.checkpoints.profitability.judgment.trim()
+              ? result.checkpoints.profitability.judgment.trim()
+              : fallback.checkpoints.profitability.judgment,
+          evidence:
+            typeof result?.checkpoints?.profitability?.evidence === "string" && result.checkpoints.profitability.evidence.trim()
+              ? result.checkpoints.profitability.evidence.trim()
+              : fallback.checkpoints.profitability.evidence,
+        },
+        cashGeneration: {
+          status:
+            result?.checkpoints?.cashGeneration?.status === "green" ||
+            result?.checkpoints?.cashGeneration?.status === "amber" ||
+            result?.checkpoints?.cashGeneration?.status === "red"
+              ? result.checkpoints.cashGeneration.status
+              : fallback.checkpoints.cashGeneration.status,
+          metric:
+            typeof result?.checkpoints?.cashGeneration?.metric === "string" && result.checkpoints.cashGeneration.metric.trim()
+              ? result.checkpoints.cashGeneration.metric.trim()
+              : fallback.checkpoints.cashGeneration.metric,
+          judgment:
+            typeof result?.checkpoints?.cashGeneration?.judgment === "string" && result.checkpoints.cashGeneration.judgment.trim()
+              ? result.checkpoints.cashGeneration.judgment.trim()
+              : fallback.checkpoints.cashGeneration.judgment,
+          evidence:
+            typeof result?.checkpoints?.cashGeneration?.evidence === "string" && result.checkpoints.cashGeneration.evidence.trim()
+              ? result.checkpoints.cashGeneration.evidence.trim()
+              : fallback.checkpoints.cashGeneration.evidence,
+        },
+        debt: {
+          status:
+            result?.checkpoints?.debt?.status === "green" ||
+            result?.checkpoints?.debt?.status === "amber" ||
+            result?.checkpoints?.debt?.status === "red"
+              ? result.checkpoints.debt.status
+              : fallback.checkpoints.debt.status,
+          metric:
+            typeof result?.checkpoints?.debt?.metric === "string" && result.checkpoints.debt.metric.trim()
+              ? result.checkpoints.debt.metric.trim()
+              : fallback.checkpoints.debt.metric,
+          judgment:
+            typeof result?.checkpoints?.debt?.judgment === "string" && result.checkpoints.debt.judgment.trim()
+              ? result.checkpoints.debt.judgment.trim()
+              : fallback.checkpoints.debt.judgment,
+          evidence:
+            typeof result?.checkpoints?.debt?.evidence === "string" && result.checkpoints.debt.evidence.trim()
+              ? result.checkpoints.debt.evidence.trim()
+              : fallback.checkpoints.debt.evidence,
+        },
+      },
+      recommendationTracks: {
+        growth: {
+          title:
+            typeof result?.recommendationTracks?.growth?.title === "string" && result.recommendationTracks.growth.title.trim()
+              ? result.recommendationTracks.growth.title.trim()
+              : fallback.recommendationTracks.growth.title,
+          diagnosis:
+            typeof result?.recommendationTracks?.growth?.diagnosis === "string" && result.recommendationTracks.growth.diagnosis.trim()
+              ? result.recommendationTracks.growth.diagnosis.trim()
+              : fallback.recommendationTracks.growth.diagnosis,
+          action:
+            typeof result?.recommendationTracks?.growth?.action === "string" && result.recommendationTracks.growth.action.trim()
+              ? result.recommendationTracks.growth.action.trim()
+              : fallback.recommendationTracks.growth.action,
+          evidence:
+            typeof result?.recommendationTracks?.growth?.evidence === "string" && result.recommendationTracks.growth.evidence.trim()
+              ? result.recommendationTracks.growth.evidence.trim()
+              : fallback.recommendationTracks.growth.evidence,
+        },
+        profitability: {
+          title:
+            typeof result?.recommendationTracks?.profitability?.title === "string" && result.recommendationTracks.profitability.title.trim()
+              ? result.recommendationTracks.profitability.title.trim()
+              : fallback.recommendationTracks.profitability.title,
+          diagnosis:
+            typeof result?.recommendationTracks?.profitability?.diagnosis === "string" && result.recommendationTracks.profitability.diagnosis.trim()
+              ? result.recommendationTracks.profitability.diagnosis.trim()
+              : fallback.recommendationTracks.profitability.diagnosis,
+          action:
+            typeof result?.recommendationTracks?.profitability?.action === "string" && result.recommendationTracks.profitability.action.trim()
+              ? result.recommendationTracks.profitability.action.trim()
+              : fallback.recommendationTracks.profitability.action,
+          evidence:
+            typeof result?.recommendationTracks?.profitability?.evidence === "string" && result.recommendationTracks.profitability.evidence.trim()
+              ? result.recommendationTracks.profitability.evidence.trim()
+              : fallback.recommendationTracks.profitability.evidence,
+        },
+        cashGeneration: {
+          title:
+            typeof result?.recommendationTracks?.cashGeneration?.title === "string" && result.recommendationTracks.cashGeneration.title.trim()
+              ? result.recommendationTracks.cashGeneration.title.trim()
+              : fallback.recommendationTracks.cashGeneration.title,
+          diagnosis:
+            typeof result?.recommendationTracks?.cashGeneration?.diagnosis === "string" && result.recommendationTracks.cashGeneration.diagnosis.trim()
+              ? result.recommendationTracks.cashGeneration.diagnosis.trim()
+              : fallback.recommendationTracks.cashGeneration.diagnosis,
+          action:
+            typeof result?.recommendationTracks?.cashGeneration?.action === "string" && result.recommendationTracks.cashGeneration.action.trim()
+              ? result.recommendationTracks.cashGeneration.action.trim()
+              : fallback.recommendationTracks.cashGeneration.action,
+          evidence:
+            typeof result?.recommendationTracks?.cashGeneration?.evidence === "string" && result.recommendationTracks.cashGeneration.evidence.trim()
+              ? result.recommendationTracks.cashGeneration.evidence.trim()
+              : fallback.recommendationTracks.cashGeneration.evidence,
+        },
+        debt: {
+          title:
+            typeof result?.recommendationTracks?.debt?.title === "string" && result.recommendationTracks.debt.title.trim()
+              ? result.recommendationTracks.debt.title.trim()
+              : fallback.recommendationTracks.debt.title,
+          diagnosis:
+            typeof result?.recommendationTracks?.debt?.diagnosis === "string" && result.recommendationTracks.debt.diagnosis.trim()
+              ? result.recommendationTracks.debt.diagnosis.trim()
+              : fallback.recommendationTracks.debt.diagnosis,
+          action:
+            typeof result?.recommendationTracks?.debt?.action === "string" && result.recommendationTracks.debt.action.trim()
+              ? result.recommendationTracks.debt.action.trim()
+              : fallback.recommendationTracks.debt.action,
+          evidence:
+            typeof result?.recommendationTracks?.debt?.evidence === "string" && result.recommendationTracks.debt.evidence.trim()
+              ? result.recommendationTracks.debt.evidence.trim()
+              : fallback.recommendationTracks.debt.evidence,
+        },
+      },
     };
   } catch (error: any) {
     console.warn("CEO brief generation fallback:", error?.message || error);
