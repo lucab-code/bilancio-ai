@@ -835,40 +835,46 @@ function BusinessCheckPointCard({ ceoBrief }: { ceoBrief: CeoBriefData }) {
 
 function BusinessRecommendationsCard({ ceoBrief }: { ceoBrief: CeoBriefData }) {
   return (
-    <Card data-testid="section-business-recommendations" className="border-border/70">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+    <Card
+      data-testid="section-business-recommendations"
+      className="overflow-hidden border-[#dfe5f0] bg-[linear-gradient(180deg,#ffffff_0%,#fbfcff_100%)] shadow-[0_24px_80px_-48px_rgba(47,73,209,0.28)]"
+    >
+      <CardHeader className="border-b border-[#e6ebf3] pb-4">
+        <CardTitle className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">
           Raccomandazioni
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="grid gap-4 md:grid-cols-2">
           {ceoBrief.recommendationTracks.map((item) => (
-            <div key={item.key} className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            <div
+              key={item.key}
+              className="stripe-card-hover rounded-[30px] border border-white/85 bg-white/88 p-6 shadow-[0_24px_56px_-42px_rgba(15,23,42,0.26)]"
+            >
+              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
                 {item.label}
               </div>
-              <div className="mt-3 text-lg font-semibold leading-snug text-foreground">
+              <div className="mt-3 text-[24px] font-semibold leading-tight tracking-[-0.04em] text-slate-950">
                 {item.title}
               </div>
               <div className="mt-4 space-y-4">
                 <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                     Insight
                   </div>
-                  <p className="mt-1 text-sm leading-6 text-foreground/85">{item.diagnosis}</p>
+                  <p className="mt-1 text-sm leading-7 text-slate-700">{item.diagnosis}</p>
                 </div>
                 <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                     Cosa fare
                   </div>
-                  <p className="mt-1 text-sm leading-6 text-foreground/85">{item.action}</p>
+                  <p className="mt-1 text-sm leading-7 text-slate-700">{item.action}</p>
                 </div>
-                <div className="rounded-2xl border border-border/60 bg-slate-50/70 px-4 py-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <div className="rounded-[24px] border border-[#e8edf5] bg-[linear-gradient(180deg,#fbfcff_0%,#f7f9fd_100%)] px-4 py-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                     Evidenza
                   </div>
-                  <p className="mt-1 text-xs leading-5 text-foreground/80">{item.evidence}</p>
+                  <p className="mt-1 text-xs leading-6 text-slate-600">{item.evidence}</p>
                 </div>
               </div>
             </div>
@@ -1865,10 +1871,10 @@ export default function ResultsPage() {
   );
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="stripe-page min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border/50 bg-card/60 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center">
+      <header className="stripe-nav sticky top-0 z-50">
+        <div className="stripe-shell max-w-3xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <Button variant="ghost" size="sm" onClick={() => setLocation("/")} data-testid="button-back-home" className="shrink-0 px-2 sm:px-3">
               <ArrowLeft className="w-4 h-4 sm:mr-1.5" />
@@ -1884,7 +1890,7 @@ export default function ResultsPage() {
       </header>
 
       {/* Content */}
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <div className="stripe-shell max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
         {/* ANAGRAFICA */}
         <Card data-testid="section-anagrafica">

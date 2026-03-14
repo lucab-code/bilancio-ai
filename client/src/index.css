@@ -2,59 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
-/* LIGHT MODE — Finance/Banking: Deep navy + teal accent */
+/* LIGHT MODE — Stripe-inspired surfaces */
 :root {
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
   --opaque-button-border-intensity: -8;
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
-  --background: 220 20% 97%;
-  --foreground: 220 30% 12%;
-  --border: 220 14% 89%;
-  --card: 220 20% 99%;
-  --card-foreground: 220 30% 12%;
-  --card-border: 220 14% 92%;
-  --sidebar: 220 25% 95%;
-  --sidebar-foreground: 220 30% 12%;
-  --sidebar-border: 220 14% 90%;
-  --sidebar-primary: 210 80% 42%;
+  --background: 220 55% 98%;
+  --foreground: 227 42% 13%;
+  --border: 218 44% 90%;
+  --card: 0 0% 100%;
+  --card-foreground: 227 42% 13%;
+  --card-border: 220 45% 91%;
+  --sidebar: 220 50% 97%;
+  --sidebar-foreground: 227 42% 13%;
+  --sidebar-border: 220 35% 91%;
+  --sidebar-primary: 248 92% 66%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 220 14% 89%;
-  --sidebar-accent-foreground: 220 30% 12%;
-  --sidebar-ring: 210 80% 42%;
-  --popover: 220 20% 97%;
-  --popover-foreground: 220 30% 12%;
-  --popover-border: 220 14% 89%;
-  --primary: 210 80% 42%;
+  --sidebar-accent: 218 48% 94%;
+  --sidebar-accent-foreground: 227 42% 13%;
+  --sidebar-ring: 248 92% 66%;
+  --popover: 220 55% 98%;
+  --popover-foreground: 227 42% 13%;
+  --popover-border: 218 44% 90%;
+  --primary: 248 92% 66%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 220 14% 92%;
-  --secondary-foreground: 220 30% 12%;
-  --muted: 220 14% 93%;
-  --muted-foreground: 220 10% 45%;
-  --accent: 174 62% 40%;
+  --secondary: 220 50% 96%;
+  --secondary-foreground: 227 42% 13%;
+  --muted: 220 38% 95%;
+  --muted-foreground: 223 17% 43%;
+  --accent: 203 97% 58%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 0 72% 50%;
+  --destructive: 355 78% 59%;
   --destructive-foreground: 0 0% 100%;
-  --input: 220 14% 78%;
-  --ring: 210 80% 42%;
-  --chart-1: 210 80% 42%;
-  --chart-2: 174 62% 40%;
-  --chart-3: 43 74% 49%;
-  --chart-4: 262 50% 48%;
-  --chart-5: 20 73% 44%;
-  --font-sans: 'General Sans', 'Inter', sans-serif;
+  --input: 220 30% 84%;
+  --ring: 248 92% 66%;
+  --chart-1: 248 92% 66%;
+  --chart-2: 203 97% 58%;
+  --chart-3: 28 95% 58%;
+  --chart-4: 320 82% 68%;
+  --chart-5: 168 55% 45%;
+  --font-sans: 'General Sans', 'Satoshi', 'Inter', sans-serif;
   --font-serif: Georgia, serif;
   --font-mono: 'JetBrains Mono', monospace;
-  --radius: .5rem;
-  --shadow-2xs: 0px 1px 2px 0px hsl(220 30% 12% / 0.04);
-  --shadow-xs: 0px 1px 3px 0px hsl(220 30% 12% / 0.06);
-  --shadow-sm: 0px 1px 3px 0px hsl(220 30% 12% / 0.08), 0px 1px 2px -1px hsl(220 30% 12% / 0.04);
-  --shadow: 0px 2px 6px 0px hsl(220 30% 12% / 0.08), 0px 1px 3px -1px hsl(220 30% 12% / 0.04);
-  --shadow-md: 0px 4px 12px 0px hsl(220 30% 12% / 0.08), 0px 2px 4px -1px hsl(220 30% 12% / 0.04);
-  --shadow-lg: 0px 8px 24px 0px hsl(220 30% 12% / 0.10), 0px 4px 6px -1px hsl(220 30% 12% / 0.04);
-  --shadow-xl: 0px 16px 48px 0px hsl(220 30% 12% / 0.12), 0px 8px 10px -1px hsl(220 30% 12% / 0.04);
-  --shadow-2xl: 0px 24px 64px 0px hsl(220 30% 12% / 0.14);
+  --radius: 1rem;
+  --shadow-2xs: 0px 1px 2px 0px hsl(227 42% 13% / 0.04);
+  --shadow-xs: 0px 1px 3px 0px hsl(227 42% 13% / 0.06);
+  --shadow-sm: 0px 6px 18px -12px hsl(227 42% 13% / 0.16);
+  --shadow: 0px 18px 40px -28px hsl(227 42% 13% / 0.22);
+  --shadow-md: 0px 24px 60px -36px hsl(227 42% 13% / 0.24);
+  --shadow-lg: 0px 28px 84px -40px hsl(227 42% 13% / 0.28);
+  --shadow-xl: 0px 36px 110px -52px hsl(227 42% 13% / 0.30);
+  --shadow-2xl: 0px 48px 132px -60px hsl(227 42% 13% / 0.34);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
@@ -131,7 +131,125 @@
     @apply border-border;
   }
   body {
-    @apply font-sans antialiased bg-background text-foreground;
+    @apply font-sans antialiased text-foreground;
+    background:
+      radial-gradient(circle at top right, rgba(99, 91, 255, 0.16), transparent 26%),
+      radial-gradient(circle at top left, rgba(54, 153, 255, 0.12), transparent 20%),
+      linear-gradient(180deg, #f6f9fc 0%, #ffffff 28%, #f7faff 100%);
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .stripe-page {
+    position: relative;
+    overflow: hidden;
+    min-height: 100vh;
+  }
+
+  .stripe-page::before {
+    content: "";
+    position: fixed;
+    top: -18rem;
+    right: -10rem;
+    width: 42rem;
+    height: 42rem;
+    border-radius: 9999px;
+    background:
+      radial-gradient(circle at 25% 25%, rgba(255, 162, 0, 0.32), transparent 35%),
+      radial-gradient(circle at 45% 55%, rgba(99, 91, 255, 0.28), transparent 42%),
+      radial-gradient(circle at 70% 35%, rgba(255, 77, 167, 0.20), transparent 44%);
+    filter: blur(26px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .stripe-page::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(111, 128, 170, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(111, 128, 170, 0.06) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: radial-gradient(circle at center, black 28%, transparent 92%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .stripe-shell {
+    position: relative;
+    z-index: 1;
+  }
+
+  .stripe-nav {
+    border-bottom: 1px solid rgba(223, 231, 245, 0.92);
+    background: rgba(255, 255, 255, 0.74);
+    backdrop-filter: blur(18px);
+  }
+
+  .stripe-panel {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(227, 234, 243, 0.9);
+    border-radius: 2rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(251, 252, 255, 0.88) 100%);
+    box-shadow: 0 34px 90px -54px rgba(17, 24, 39, 0.36);
+    backdrop-filter: blur(16px);
+  }
+
+  .stripe-panel-soft {
+    border: 1px solid rgba(227, 234, 243, 0.82);
+    border-radius: 1.75rem;
+    background: rgba(255, 255, 255, 0.86);
+    box-shadow: 0 24px 56px -44px rgba(17, 24, 39, 0.32);
+    backdrop-filter: blur(14px);
+  }
+
+  .stripe-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(109, 118, 255, 0.18);
+    background: rgba(99, 91, 255, 0.08);
+    padding: 0.45rem 0.85rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: #635bff;
+  }
+
+  .stripe-display {
+    color: #101840;
+    font-size: clamp(2.6rem, 4vw, 4.8rem);
+    font-weight: 600;
+    line-height: 0.98;
+    letter-spacing: -0.05em;
+  }
+
+  .stripe-lead {
+    color: rgba(44, 62, 106, 0.84);
+    font-size: clamp(1rem, 1.5vw, 1.25rem);
+    line-height: 1.7;
+  }
+
+  .stripe-subtle-grid {
+    background-image:
+      linear-gradient(to right, rgba(111, 128, 170, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(111, 128, 170, 0.06) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+
+  .stripe-card-hover {
+    transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+  }
+
+  .stripe-card-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 32px 72px -48px rgba(17, 24, 39, 0.34);
+    border-color: rgba(99, 91, 255, 0.22);
   }
 }
 

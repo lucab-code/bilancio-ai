@@ -258,17 +258,17 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="stripe-page min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border/50 bg-card/60 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <header className="stripe-nav sticky top-0 z-50">
+        <div className="stripe-shell mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <div className="flex items-center gap-3">
             <BilancioLogo className="w-8 h-8 text-primary" />
-            <span className="text-lg font-semibold tracking-tight">BilancioAI</span>
+            <span className="text-lg font-semibold tracking-[-0.04em] text-slate-950">BilancioAI</span>
           </div>
           <div className="flex items-center gap-3">
             {token && (
-              <div className="flex items-center gap-3 rounded-full border border-primary/15 bg-primary/5 px-4 py-2">
+              <div className="flex items-center gap-3 rounded-full border border-white/80 bg-white/88 px-4 py-2 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.25)]">
                 <div className="flex items-center gap-2 text-sm">
                   <CreditCard className="h-4 w-4 text-primary" />
                   <span className="hidden sm:inline text-muted-foreground">Credito</span>
@@ -297,37 +297,43 @@ export default function HomePage() {
       </header>
 
       {/* Hero */}
-      <section className="py-20 px-6">
-        <div className="max-w-4xl mx-auto text-center slide-up">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/10 text-accent text-sm font-medium mb-6">
+      <section className="stripe-shell px-6 pb-20 pt-10">
+        <div className="stripe-panel stripe-subtle-grid mx-auto max-w-6xl px-6 py-10 text-center sm:px-10 sm:py-14">
+          <div className="mx-auto max-w-4xl slide-up">
+          <div className="stripe-kicker mb-6">
             <Zap className="w-3.5 h-3.5" />
             Powered by AI e Camera di Commercio
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-4 leading-tight">
+          <h1 className="stripe-display mb-5">
             Analizza i bilanci aziendali
             <br />
-            <span className="text-primary">con benchmark e raccomandazioni</span>
+            <span className="bg-[linear-gradient(120deg,#635bff_0%,#0a84ff_55%,#ff7a00_100%)] bg-clip-text text-transparent">
+              con benchmark e raccomandazioni
+            </span>
           </h1>
-          <p className="text-muted-foreground text-base md:text-lg max-w-2xl mx-auto mb-12">
+          <p className="stripe-lead mx-auto mb-12 max-w-3xl">
             BilancioAI unisce bilanci ufficiali, confronto con il mercato, lettura di circolante e debito
             e ti lascia usare anche i bilanci che hai gia', se vuoi partire dai tuoi documenti.
           </p>
 
-          <div className="grid gap-5 md:grid-cols-2 max-w-3xl mx-auto">
+          <div className="mx-auto grid max-w-5xl gap-5 md:grid-cols-2">
             <Link href="/analysis/business">
               <div
-                className="group relative flex min-h-[320px] h-full flex-col bg-card border border-border rounded-xl p-8 text-left cursor-pointer transition-all duration-200 hover:border-primary/40 hover:shadow-lg"
+                className="stripe-card-hover group relative flex min-h-[320px] h-full flex-col rounded-[32px] border border-white/80 bg-white/92 p-8 text-left shadow-[0_24px_60px_-42px_rgba(15,23,42,0.28)]"
                 data-testid="card-business-mode"
               >
-                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-5 group-hover:bg-primary/15 transition-colors">
+                <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
+                  Checkup
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-[linear-gradient(135deg,rgba(99,91,255,0.16),rgba(10,132,255,0.12))] flex items-center justify-center mb-5 transition-colors">
                   <Building2 className="w-6 h-6 text-primary" />
                 </div>
-                <h2 className="text-lg font-semibold mb-2">Analizza la mia azienda</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed">
+                <h2 className="mb-3 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">Analizza la mia azienda</h2>
+                <p className="text-sm leading-7 text-slate-600">
                   Cerca la tua azienda, scarica il bilancio e ottieni un'analisi 
                   finanziaria completa con indici, benchmark e raccomandazioni.
                 </p>
-                <div className="mt-auto pt-5 text-sm font-medium text-primary flex items-center gap-1.5 group-hover:gap-2.5 transition-all">
+                <div className="mt-auto pt-6 text-sm font-semibold text-primary flex items-center gap-2 transition-all">
                   Inizia l'analisi
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
@@ -338,18 +344,21 @@ export default function HomePage() {
 
             <Link href="/analysis/competitor">
               <div
-                className="group relative flex min-h-[320px] h-full flex-col bg-card border border-border rounded-xl p-8 text-left cursor-pointer transition-all duration-200 hover:border-accent/40 hover:shadow-lg"
+                className="stripe-card-hover group relative flex min-h-[320px] h-full flex-col rounded-[32px] border border-white/80 bg-white/92 p-8 text-left shadow-[0_24px_60px_-42px_rgba(15,23,42,0.28)]"
                 data-testid="card-competitor-mode"
               >
-                <div className="w-12 h-12 rounded-lg bg-accent/10 flex items-center justify-center mb-5 group-hover:bg-accent/15 transition-colors">
+                <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-accent/15 bg-accent/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+                  Market map
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-[linear-gradient(135deg,rgba(10,132,255,0.16),rgba(99,91,255,0.12))] flex items-center justify-center mb-5 transition-colors">
                   <Users className="w-6 h-6 text-accent" />
                 </div>
-                <h2 className="text-lg font-semibold mb-2">Analizza i competitor</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed">
+                <h2 className="mb-3 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">Analizza i competitor</h2>
+                <p className="text-sm leading-7 text-slate-600">
                   Inserisci la tua azienda e confrontala con i competitor. Puoi fornirli 
                   tu oppure lasciare che l'AI li identifichi automaticamente.
                 </p>
-                <div className="mt-auto pt-5 text-sm font-medium text-accent flex items-center gap-1.5 group-hover:gap-2.5 transition-all">
+                <div className="mt-auto pt-6 text-sm font-semibold text-accent flex items-center gap-2 transition-all">
                   Analisi competitiva
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
@@ -360,18 +369,21 @@ export default function HomePage() {
 
             <Link href="/analysis/business?intent=target">
               <div
-                className="group relative flex min-h-[320px] h-full flex-col bg-card border border-border rounded-xl p-8 text-left cursor-pointer transition-all duration-200 hover:border-emerald-500/40 hover:shadow-lg"
+                className="stripe-card-hover group relative flex min-h-[320px] h-full flex-col rounded-[32px] border border-white/80 bg-white/92 p-8 text-left shadow-[0_24px_60px_-42px_rgba(15,23,42,0.28)]"
                 data-testid="card-target-mode"
               >
-                <div className="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center mb-5 group-hover:bg-emerald-500/15 transition-colors">
+                <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-emerald-500/15 bg-emerald-500/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-600">
+                  Deal flow
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-[linear-gradient(135deg,rgba(16,185,129,0.16),rgba(10,132,255,0.12))] flex items-center justify-center mb-5 transition-colors">
                   <TrendingUp className="w-6 h-6 text-emerald-600" />
                 </div>
-                <h2 className="text-lg font-semibold mb-2">Analizza una target</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed">
+                <h2 className="mb-3 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">Analizza una target</h2>
+                <p className="text-sm leading-7 text-slate-600">
                   Valuta rapidamente una societa' target con storico economico, descrizione del business model
                   e indicatori chiave per una prima lettura da investitore.
                 </p>
-                <div className="mt-auto pt-5 text-sm font-medium text-emerald-600 flex items-center gap-1.5 group-hover:gap-2.5 transition-all">
+                <div className="mt-auto pt-6 text-sm font-semibold text-emerald-600 flex items-center gap-2 transition-all">
                   Valuta la target
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
@@ -382,17 +394,20 @@ export default function HomePage() {
 
             <Link href="/analysis/business?intent=explore">
               <div
-                className="group relative flex min-h-[320px] h-full flex-col bg-card border border-border rounded-xl p-8 text-left cursor-pointer transition-all duration-200 hover:border-violet-500/40 hover:shadow-lg"
+                className="stripe-card-hover group relative flex min-h-[320px] h-full flex-col rounded-[32px] border border-white/80 bg-white/92 p-8 text-left shadow-[0_24px_60px_-42px_rgba(15,23,42,0.28)]"
                 data-testid="card-explore-mode"
               >
-                <div className="w-12 h-12 rounded-lg bg-violet-500/10 flex items-center justify-center mb-5 group-hover:bg-violet-500/15 transition-colors">
+                <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-violet-500/15 bg-violet-500/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-600">
+                  Explore
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-[linear-gradient(135deg,rgba(139,92,246,0.16),rgba(99,91,255,0.12))] flex items-center justify-center mb-5 transition-colors">
                   <Eye className="w-6 h-6 text-violet-600" />
                 </div>
-                <h2 className="text-lg font-semibold mb-2">Sto semplicemente curiosando 😏</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed">
+                <h2 className="mb-3 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">Sto semplicemente curiosando 😏</h2>
+                <p className="text-sm leading-7 text-slate-600">
                   Sbircia aziende, bilanci e numeri per pura curiosita' imprenditoriale, senza un caso d'uso troppo serio.
                 </p>
-                <div className="mt-auto pt-5 text-sm font-medium text-violet-600 flex items-center gap-1.5 group-hover:gap-2.5 transition-all">
+                <div className="mt-auto pt-6 text-sm font-semibold text-violet-600 flex items-center gap-2 transition-all">
                   Fammi curiosare
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
@@ -401,14 +416,15 @@ export default function HomePage() {
               </div>
             </Link>
           </div>
+          </div>
         </div>
       </section>
 
-      <section className="border-t border-border/50 px-6 py-14">
-        <div className="mx-auto max-w-5xl">
+      <section className="stripe-shell px-6 py-6">
+        <div className="stripe-panel-soft mx-auto max-w-5xl px-6 py-8 sm:px-8">
           <div className="mb-6 flex items-end justify-between gap-3">
             <div>
-              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">
+              <div className="mb-2 stripe-kicker">
                 <History className="h-3.5 w-3.5" />
                 History
               </div>
@@ -427,7 +443,7 @@ export default function HomePage() {
           {isLoadingAnalyses ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {Array.from({ length: 3 }).map((_, index) => (
-                <Card key={index} className="animate-pulse border-border/60 p-5">
+              <Card key={index} className="animate-pulse border-border/60 p-5">
                   <div className="h-4 w-32 rounded bg-muted" />
                   <div className="mt-3 h-3 w-24 rounded bg-muted" />
                   <div className="mt-5 h-9 w-full rounded bg-muted" />
@@ -448,7 +464,7 @@ export default function HomePage() {
                 return (
                   <Card
                     key={analysis.id}
-                    className="group border-border/70 bg-card/80 p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-md"
+                    className="stripe-card-hover group border-border/70 bg-card/88 p-5"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -506,7 +522,7 @@ export default function HomePage() {
               })}
             </div>
           ) : (
-            <Card className="border-dashed border-border/70 bg-card/60 p-6">
+            <Card className="border-dashed border-border/70 bg-card/75 p-6">
               <div className="flex flex-col gap-2">
                 <div className="text-sm font-medium text-foreground">Nessuna societa' analizzata ancora</div>
                 <p className="text-sm text-muted-foreground">
@@ -519,9 +535,9 @@ export default function HomePage() {
       </section>
 
       {/* Features */}
-      <section className="py-16 px-6 border-t border-border/50">
-        <div className="max-w-5xl mx-auto">
-          <h3 className="text-center text-sm font-medium text-muted-foreground uppercase tracking-wider mb-10">
+      <section className="stripe-shell px-6 py-16">
+        <div className="stripe-panel-soft mx-auto max-w-5xl px-6 py-10 sm:px-8">
+          <h3 className="text-center text-sm font-medium text-muted-foreground uppercase tracking-[0.24em] mb-10">
             Come funziona
           </h3>
           <div className="grid md:grid-cols-3 gap-8">
@@ -542,12 +558,12 @@ export default function HomePage() {
                 desc: "Leggi in pochi minuti circolante, debito e priorità operative invece di fermarti ai numeri grezzi.",
               },
             ].map((f, i) => (
-              <div key={i} className="text-center fade-in" style={{ animationDelay: `${i * 100}ms` }}>
-                <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center mx-auto mb-4 text-foreground">
+              <div key={i} className="stripe-card-hover rounded-[28px] border border-white/80 bg-white/82 p-6 text-center fade-in" style={{ animationDelay: `${i * 100}ms` }}>
+                <div className="w-12 h-12 rounded-2xl bg-[linear-gradient(135deg,rgba(99,91,255,0.12),rgba(10,132,255,0.1))] flex items-center justify-center mx-auto mb-4 text-foreground">
                   {f.icon}
                 </div>
-                <h4 className="font-medium mb-2">{f.title}</h4>
-                <p className="text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
+                <h4 className="mb-2 text-lg font-semibold tracking-[-0.03em] text-slate-950">{f.title}</h4>
+                <p className="text-sm leading-7 text-slate-600">{f.desc}</p>
               </div>
             ))}
           </div>
@@ -555,8 +571,8 @@ export default function HomePage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border/50 py-8 px-6">
-        <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+      <footer className="stripe-shell px-6 pb-8 pt-4">
+        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-4 border-t border-white/70 pt-6 md:grid-cols-3 items-center">
           <div className="flex items-center gap-2 text-sm text-muted-foreground md:justify-start justify-center order-2 md:order-1">
             <BilancioLogo className="w-5 h-5" />
             BilancioAI — Analisi finanziaria intelligente

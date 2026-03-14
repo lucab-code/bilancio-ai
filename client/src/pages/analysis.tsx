@@ -822,10 +822,10 @@ export default function AnalysisPage() {
     mode !== "business" || documentPreference !== "upload" || uploadedBilanci.length > 0;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="stripe-page min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border/50 bg-card/60 backdrop-blur-md sticky top-0 z-50">
-        <div className="mx-auto flex h-16 w-full max-w-5xl items-center gap-4 px-4 sm:px-6">
+      <header className="stripe-nav sticky top-0 z-50">
+        <div className="stripe-shell mx-auto flex h-16 w-full max-w-5xl items-center gap-4 px-4 sm:px-6">
           <Button variant="ghost" size="sm" onClick={() => setLocation("/")} data-testid="button-back">
             <ArrowLeft className="w-4 h-4 mr-1.5" />
             Indietro
@@ -844,14 +844,15 @@ export default function AnalysisPage() {
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+      <div className="stripe-shell mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
         <div className="mx-auto w-full max-w-4xl">
         {/* Step 1: Company Search */}
-        <div className="mb-8 fade-in">
-          <h2 className="text-xl font-semibold mb-2">
+        <div className="stripe-panel mb-8 p-6 sm:p-8 fade-in">
+          <div className="stripe-kicker mb-5">{mode === "business" ? "Company search" : "Competitive map"}</div>
+          <h2 className="text-[32px] font-semibold tracking-[-0.04em] text-slate-950 mb-2">
             Cerca la tua azienda
           </h2>
-          <p className="text-sm text-muted-foreground mb-5">
+          <p className="text-sm text-slate-600 mb-5 leading-7">
             Scrivi nome e localita' nella stessa ricerca, ad esempio `GEL SPA Castelfidardo`.
           </p>
 

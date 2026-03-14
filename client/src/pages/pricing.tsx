@@ -102,9 +102,9 @@ export default function PricingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border/50 bg-card/60 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center">
+    <div className="stripe-page min-h-screen bg-background">
+      <header className="stripe-nav sticky top-0 z-50">
+        <div className="stripe-shell mx-auto flex h-14 max-w-5xl items-center px-4 sm:h-16 sm:px-6">
           <Button variant="ghost" size="sm" onClick={() => navigate("/")} className="gap-2">
             <ArrowLeft className="w-4 h-4" />
             Home
@@ -112,10 +112,11 @@ export default function PricingPage() {
         </div>
       </header>
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12">
-        <div className="text-center mb-12">
-          <h1 className="text-3xl font-bold tracking-tight">Scegli il piano giusto per te</h1>
-          <p className="text-muted-foreground mt-3 max-w-lg mx-auto">
+      <div className="stripe-shell mx-auto max-w-5xl px-4 py-12 sm:px-6">
+        <div className="stripe-panel mb-12 px-6 py-10 text-center sm:px-10 sm:py-14">
+          <div className="stripe-kicker mb-6">Pricing</div>
+          <h1 className="stripe-display text-[clamp(2.4rem,3vw,4rem)]">Scegli il piano giusto per te</h1>
+          <p className="stripe-lead mt-4 mx-auto max-w-2xl">
             BilancioAI combina bilanci ufficiali, benchmark di mercato e raccomandazioni operative in un report unico.
           </p>
         </div>
@@ -126,7 +127,7 @@ export default function PricingPage() {
             return (
               <Card
                 key={plan.id}
-                className={`relative flex flex-col ${plan.highlight ? "border-primary shadow-lg ring-1 ring-primary/20" : ""}`}
+                className={`stripe-card-hover relative flex flex-col ${plan.highlight ? "border-primary/30 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(244,243,255,0.94)_100%)] shadow-[0_32px_80px_-48px_rgba(99,91,255,0.42)] ring-1 ring-primary/15" : ""}`}
               >
                 {plan.highlight && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
@@ -134,15 +135,16 @@ export default function PricingPage() {
                   </div>
                 )}
                 <CardHeader className="pb-2">
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="mb-3 inline-flex w-fit items-center gap-2 rounded-full border border-white/80 bg-white/75 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     <Icon className="w-5 h-5 text-primary" />
-                    <CardTitle className="text-lg">{plan.name}</CardTitle>
+                    {plan.name}
                   </div>
+                  <CardTitle className="text-[28px] tracking-[-0.04em]">{plan.name}</CardTitle>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-3xl font-bold">{"\u20ac"}{plan.price}</span>
+                    <span className="text-4xl font-semibold tracking-[-0.05em]">{"\u20ac"}{plan.price}</span>
                     {plan.period && <span className="text-sm text-muted-foreground">{plan.period}</span>}
                   </div>
-                  <p className="text-sm text-muted-foreground mt-1">{plan.description}</p>
+                  <p className="mt-2 text-sm leading-7 text-slate-600">{plan.description}</p>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col">
                   <ul className="space-y-2 flex-1">
@@ -176,10 +178,10 @@ export default function PricingPage() {
           })}
         </div>
 
-        <div className="mt-16 max-w-2xl mx-auto">
-          <h2 className="text-xl font-semibold text-center mb-6">Domande frequenti</h2>
+        <div className="stripe-panel-soft mt-16 mx-auto max-w-2xl px-6 py-8">
+          <h2 className="mb-6 text-center text-xl font-semibold tracking-[-0.03em]">Domande frequenti</h2>
           <div className="space-y-4">
-            <div>
+            <div className="rounded-[24px] border border-white/75 bg-white/70 p-4">
               <h3 className="font-medium text-sm">Cosa include l'analisi singola?</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 Include il report completo azienda con grafici ricavi/EBITDA, summary financials,
@@ -187,21 +189,21 @@ export default function PricingPage() {
                 e la possibilita' di usare i bilanci che hai gia' caricandoli direttamente in piattaforma.
               </p>
             </div>
-            <div>
+            <div className="rounded-[24px] border border-white/75 bg-white/70 p-4">
               <h3 className="font-medium text-sm">Cosa sblocca BilancioAI Plus?</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 Hai 5 analisi incluse al mese, dashboard con storico, benchmark di mercato, raccomandazioni,
                 caricamento dei tuoi bilanci e possibilita' di usare il wallet per analisi extra.
               </p>
             </div>
-            <div>
+            <div className="rounded-[24px] border border-white/75 bg-white/70 p-4">
               <h3 className="font-medium text-sm">Posso cambiare piano in qualsiasi momento?</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 S{"\u00ec"}, puoi aggiornare o cancellare il tuo abbonamento in qualsiasi momento.
                 Il cambio ha effetto immediato.
               </p>
             </div>
-            <div>
+            <div className="rounded-[24px] border border-white/75 bg-white/70 p-4">
               <h3 className="font-medium text-sm">Come funzionano le analisi extra?</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 Se finisci le analisi incluse, puoi ricaricare credito wallet e lanciare nuovi report
