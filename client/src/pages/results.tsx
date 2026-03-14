@@ -1869,6 +1869,33 @@ export default function ResultsPage() {
     (Array.isArray(data.analysis?.threats) && data.analysis.threats.length > 0) ||
     (Array.isArray(data.analysis?.recommendations) && data.analysis.recommendations.length > 0)
   );
+  const latestFinancialYear =
+    activeChartData?.years?.[0] ||
+    Object.keys(bilanci || {})
+      .filter((year) => bilanci?.[year]?.status !== "missing")
+      .sort((a, b) => b.localeCompare(a))[0] ||
+    null;
+  const latestFinancialRow = latestFinancialYear ? bilanci?.[latestFinancialYear] || null : null;
+  const businessHeroStats = latestFinancialYear
+    ? [
+        {
+          label: "Ricavi",
+          value: isFiniteNumeric(latestFinancialRow?.fatturato) ? formatCurrency(latestFinancialRow.fatturato) : "N/D",
+        },
+        {
+          label: "EBITDA margin",
+          value: formatCheckpointPercent(calculateSafePercentage(latestFinancialRow?.ebitda, latestFinancialRow?.fatturato)),
+        },
+        {
+          label: "Cash conversion",
+          value: formatCheckpointPercent(
+            isFiniteNumeric(latestFinancialRow?.cash_conversion)
+              ? latestFinancialRow.cash_conversion
+              : calculateSafePercentage(latestFinancialRow?.unlevered_free_cash_flow, latestFinancialRow?.ebitda),
+          ),
+        },
+      ]
+    : [];
 
   return (
     <div className="stripe-page min-h-screen bg-background">
@@ -1891,6 +1918,46 @@ export default function ResultsPage() {
 
       {/* Content */}
       <div className="stripe-shell max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+        {isBusinessMode && (
+          <div className="stripe-panel px-6 py-8 sm:px-8">
+            <div className="flex flex-col gap-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="stripe-kicker mb-4">Business Report</div>
+                  <h1 className="text-[36px] font-semibold tracking-[-0.05em] text-slate-950 sm:text-[52px]">
+                    {company.denominazione}
+                  </h1>
+                  {companyDetails?.forma_giuridica && (
+                    <p className="mt-2 text-sm text-slate-500">{companyDetails.forma_giuridica}</p>
+                  )}
+                </div>
+                {latestFinancialYear && (
+                  <div className="rounded-full border border-white/80 bg-white/88 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.25)]">
+                    Ultimo anno {latestFinancialYear}
+                  </div>
+                )}
+              </div>
+              {businessHeroStats.length > 0 && (
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {businessHeroStats.map((item) => (
+                    <div
+                      key={item.label}
+                      className="rounded-[26px] border border-white/80 bg-white/88 px-5 py-5 shadow-[0_22px_56px_-46px_rgba(15,23,42,0.3)]"
+                    >
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                        {item.label}
+                      </div>
+                      <div className="mt-2 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">
+                        {item.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ANAGRAFICA */}
         <Card data-testid="section-anagrafica">
