@@ -1,0 +1,37 @@
+<svg width="188" height="92" viewBox="0 0 188 92" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g filter="url(#shadow)">
+    <rect x="12" y="18" width="164" height="56" rx="28" fill="url(#surface)" />
+    <rect x="12.5" y="18.5" width="163" height="55" rx="27.5" stroke="url(#stroke)" />
+    <circle cx="64" cy="46" r="12" fill="#DCE3EF" />
+    <circle cx="94" cy="46" r="12" fill="url(#amber)" />
+    <circle cx="124" cy="46" r="12" fill="#DCE3EF" />
+    <circle cx="94" cy="46" r="22" fill="url(#amberGlow)" />
+  </g>
+  <defs>
+    <filter id="shadow" x="0" y="0" width="188" height="92" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix" />
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha" />
+      <feOffset dy="10" />
+      <feGaussianBlur stdDeviation="6" />
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0588235 0 0 0 0 0.0901961 0 0 0 0 0.164706 0 0 0 0.12 0" />
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1" />
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape" />
+    </filter>
+    <linearGradient id="surface" x1="24" y1="22" x2="166" y2="74" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" />
+      <stop offset="1" stop-color="#F8FAFF" />
+    </linearGradient>
+    <linearGradient id="stroke" x1="20" y1="24" x2="168" y2="74" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E4EAF4" />
+      <stop offset="1" stop-color="#D6DDED" />
+    </linearGradient>
+    <radialGradient id="amber" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(90 42) rotate(46.1233) scale(22.5111)">
+      <stop stop-color="#F9C96C" />
+      <stop offset="1" stop-color="#F3A22E" />
+    </radialGradient>
+    <radialGradient id="amberGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(94 46) rotate(90) scale(22)">
+      <stop stop-color="#F9C96C" stop-opacity="0.22" />
+      <stop offset="1" stop-color="#F9C96C" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+</svg>

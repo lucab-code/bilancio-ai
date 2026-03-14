@@ -12,6 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/App";
 import { PoweredByAttribution } from "@/components/PoweredByAttribution";
 import { PremiumGate } from "@/components/PremiumGate";
+import trafficLightAmber from "@/assets/checkpoint/traffic-light-amber.svg";
+import trafficLightGreen from "@/assets/checkpoint/traffic-light-green.svg";
+import trafficLightRed from "@/assets/checkpoint/traffic-light-red.svg";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
@@ -481,26 +484,10 @@ function getBenchmarkStatusTone(status: string | undefined) {
   };
 }
 
-function getCheckpointTone(status: CheckPointStatus) {
-  if (status === "green") {
-    return {
-      badge: "Verde",
-      badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
-      activeClassName: "bg-emerald-500",
-    };
-  }
-  if (status === "red") {
-    return {
-      badge: "Rosso",
-      badgeClassName: "border-rose-200 bg-rose-50 text-rose-700",
-      activeClassName: "bg-rose-500",
-    };
-  }
-  return {
-    badge: "Arancione",
-    badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",
-    activeClassName: "bg-amber-500",
-  };
+function getTrafficLightAsset(status: CheckPointStatus) {
+  if (status === "green") return trafficLightGreen;
+  if (status === "red") return trafficLightRed;
+  return trafficLightAmber;
 }
 
 function mapRecommendationThemeToTrackKey(theme: unknown): CheckPointKey {
@@ -813,65 +800,34 @@ function FinancialTableCard({
   );
 }
 
-function HorizontalTrafficLight({ status }: { status: CheckPointStatus }) {
-  const dotColors = ["bg-emerald-500", "bg-amber-500", "bg-rose-500"];
-  const activeIndex = status === "green" ? 0 : status === "amber" ? 1 : 2;
-
-  return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-white/90 px-3 py-2 shadow-sm">
-      {dotColors.map((dotClassName, index) => (
-        <span
-          key={`${status}-${index}`}
-          className={`h-3.5 w-3.5 rounded-full ${index === activeIndex ? dotClassName : "bg-slate-200"}`}
-        />
-      ))}
-    </div>
-  );
-}
-
 function BusinessCheckPointCard({ ceoBrief }: { ceoBrief: CeoBriefData }) {
   return (
-    <Card data-testid="section-check-point" className="overflow-hidden border-border/70">
-      <CardHeader className="gap-3 border-b border-border/60 bg-slate-50/80">
-        <CardTitle className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+    <Card
+      data-testid="section-check-point"
+      className="overflow-hidden border-[#dfe5f0] bg-[linear-gradient(180deg,#ffffff_0%,#fbfcff_100%)] shadow-[0_24px_80px_-48px_rgba(47,73,209,0.35)]"
+    >
+      <CardHeader className="relative overflow-hidden border-b border-[#e6ebf3] pb-6">
+        <div className="absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.18),transparent_42%),radial-gradient(circle_at_top_left,rgba(249,115,22,0.12),transparent_30%)]" />
+        <CardTitle className="relative text-sm font-semibold uppercase tracking-[0.28em] text-slate-500">
           Check Point
         </CardTitle>
-        {ceoBrief.overview && (
-          <p className="max-w-3xl text-sm leading-6 text-foreground/85">{ceoBrief.overview}</p>
-        )}
       </CardHeader>
-      <CardContent className="space-y-4 pt-6">
-        {ceoBrief.checkpoints.map((item) => {
-          const tone = getCheckpointTone(item.status);
-
-          return (
-            <div
-              key={item.key}
-              className="grid gap-4 rounded-3xl border border-border/70 bg-card px-5 py-5 md:grid-cols-[minmax(0,1fr)_160px] md:items-center"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    {item.label}
-                  </span>
-                  <span className="rounded-full border border-border/60 px-3 py-1 text-[11px] font-medium text-foreground/80">
-                    {item.metric}
-                  </span>
-                </div>
-                <p className="mt-3 text-base font-semibold leading-7 text-foreground">
-                  {item.judgment}
-                </p>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.evidence}</p>
-              </div>
-              <div className="flex flex-col items-start gap-3 md:items-end">
-                <HorizontalTrafficLight status={item.status} />
-                <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${tone.badgeClassName}`}>
-                  {tone.badge}
-                </span>
-              </div>
+      <CardContent className="space-y-4 bg-[linear-gradient(180deg,rgba(248,250,255,0.4)_0%,rgba(255,255,255,0)_100%)] pt-6">
+        {ceoBrief.checkpoints.map((item) => (
+          <div
+            key={item.key}
+            className="flex items-center justify-between gap-6 rounded-[32px] border border-[#e3e8f2] bg-white px-6 py-6 shadow-[0_22px_56px_-42px_rgba(15,23,42,0.3)]"
+          >
+            <div className="min-w-0 text-[20px] font-medium tracking-[-0.03em] text-slate-900 sm:text-[30px]">
+              {item.label}
             </div>
-          );
-        })}
+            <img
+              src={getTrafficLightAsset(item.status)}
+              alt={`${item.label} ${item.status}`}
+              className="h-14 w-auto shrink-0 sm:h-16"
+            />
+          </div>
+        ))}
       </CardContent>
     </Card>
   );
