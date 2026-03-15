@@ -983,6 +983,60 @@ function getPurchasedBilanciBySource(
   }, {} as Record<string, any>);
 }
 
+function buildCachedBilancioPackageFromBusinessSnapshot(snapshot: any) {
+  const financialData = snapshot?.financialData;
+  if (!financialData || typeof financialData !== "object") return undefined;
+
+  const purchasedBilanci = getPurchasedBilanciBySource(financialData, BILANCIO_OTTICO_PDF_SOURCE);
+  const bilanciFromSnapshot =
+    financialData?.bilanci && typeof financialData.bilanci === "object"
+      ? financialData.bilanci
+      : snapshot?.companyDetails?.dettaglio?.bilanci && typeof snapshot.companyDetails.dettaglio.bilanci === "object"
+        ? snapshot.companyDetails.dettaglio.bilanci
+        : {};
+
+  if (Object.keys(purchasedBilanci).length === 0 && Object.keys(bilanciFromSnapshot).length === 0) {
+    return undefined;
+  }
+
+  return {
+    bilanci: bilanciFromSnapshot,
+    purchasedBilanci,
+    purchasedBilanciBySource:
+      Object.keys(purchasedBilanci).length > 0
+        ? { [BILANCIO_OTTICO_PDF_SOURCE]: purchasedBilanci }
+        : {},
+  };
+}
+
+function mergeCachedBilancioPackages(primaryPackage: any, fallbackPackage: any) {
+  if (!primaryPackage && !fallbackPackage) return undefined;
+
+  const primaryBilanci =
+    primaryPackage?.bilanci && typeof primaryPackage.bilanci === "object"
+      ? primaryPackage.bilanci
+      : {};
+  const fallbackBilanci =
+    fallbackPackage?.bilanci && typeof fallbackPackage.bilanci === "object"
+      ? fallbackPackage.bilanci
+      : {};
+  const primaryPurchased = getPurchasedBilanciBySource(primaryPackage, BILANCIO_OTTICO_PDF_SOURCE);
+  const fallbackPurchased = getPurchasedBilanciBySource(fallbackPackage, BILANCIO_OTTICO_PDF_SOURCE);
+  const mergedPurchased = {
+    ...fallbackPurchased,
+    ...primaryPurchased,
+  };
+
+  return {
+    bilanci: Object.keys(primaryBilanci).length > 0 ? primaryBilanci : fallbackBilanci,
+    purchasedBilanci: mergedPurchased,
+    purchasedBilanciBySource:
+      Object.keys(mergedPurchased).length > 0
+        ? { [BILANCIO_OTTICO_PDF_SOURCE]: mergedPurchased }
+        : {},
+  };
+}
+
 function buildCoveredYears(latestYear: string): string[] {
   const parsed = Number.parseInt(latestYear, 10);
   if (!Number.isFinite(parsed)) return [];
@@ -4284,9 +4338,15 @@ export function registerRoutes(server: Server, app: Express): void {
         return failWithRefund(400, "Codice fiscale o partita IVA non disponibili per il bilancio ottico");
       }
 
-      const cachedPackage =
+      const cachedPackage = mergeCachedBilancioPackages(
         (await storage.getCachedBilancioPackageByTaxCode(finalTaxCode)) ||
-        (await storage.getCachedBilancioPackage(normalizedCompanyId));
+          (await storage.getCachedBilancioPackage(normalizedCompanyId)),
+        buildCachedBilancioPackageFromBusinessSnapshot(previousBusinessCache),
+      );
+      const reusableComparativeBilanciFromCache =
+        documentPreference === "openapi" && hasUsableBilancioOtticoBusinessCache(previousBusinessCache)
+          ? previousBusinessCache?.financialData?.bilanci
+          : null;
       let purchasedBilanci = getPurchasedBilanciBySource(cachedPackage, BILANCIO_OTTICO_PDF_SOURCE);
       let resolvedBilanciEntries = {
         ...purchasedBilanci,
@@ -4322,7 +4382,7 @@ export function registerRoutes(server: Server, app: Express): void {
       let missingPurchaseYears = purchaseYears.filter((year) => !resolvedBilanciEntries[year]);
       const purchaseErrors: string[] = [];
 
-      if (missingPurchaseYears.length > 0) {
+      if (missingPurchaseYears.length > 0 && !reusableComparativeBilanciFromCache) {
         try {
           probeSearchRequest = await createDocuEngineSearchRequest(finalTaxCode, DOCUENGINE_DOCUMENT_IDS.BILANCIO_OTTICO);
           const docuEngineAvailableYears = Array.from(
@@ -4354,7 +4414,7 @@ export function registerRoutes(server: Server, app: Express): void {
         }
       }
 
-      for (let index = 0; index < missingPurchaseYears.length; index++) {
+      for (let index = 0; index < missingPurchaseYears.length && !reusableComparativeBilanciFromCache; index++) {
         const year = missingPurchaseYears[index];
         try {
           const searchRequest = index === 0 && probeSearchRequest
@@ -4422,25 +4482,25 @@ export function registerRoutes(server: Server, app: Express): void {
       };
 
       let comparativeBilanci = buildBilanciFromComparativeXbrl(resolvedBilanciEntries, coveredYears);
-      if (hasUsableBilancioOtticoBusinessCache(previousBusinessCache)) {
+      if (reusableComparativeBilanciFromCache) {
         comparativeBilanci = mergeComparativeBilanci(
           comparativeBilanci,
-          previousBusinessCache?.financialData?.bilanci,
+          reusableComparativeBilanciFromCache,
           coveredYears,
         );
       }
       let hasAnyParsedPeriod = Object.values(comparativeBilanci).some((yearData: any) => yearData?.status === "ok");
 
-      if (shouldEnrichComparativeBilanciWithAi(comparativeBilanci, coveredYears)) {
+      if (!reusableComparativeBilanciFromCache && shouldEnrichComparativeBilanciWithAi(comparativeBilanci, coveredYears)) {
         try {
           const extractedBilanci = await extractComparativeBilanciFromOtticoPdfs(resolvedBilanciEntries, purchaseYears, coveredYears);
           if (extractedBilanci) {
             comparativeBilanci = mergeComparativeBilanci(comparativeBilanci, extractedBilanci, coveredYears);
             hasAnyParsedPeriod = Object.values(comparativeBilanci).some((yearData: any) => yearData?.status === "ok");
-          } else if (!hasAnyParsedPeriod && hasUsableBilancioOtticoBusinessCache(previousBusinessCache)) {
+          } else if (!hasAnyParsedPeriod && reusableComparativeBilanciFromCache) {
             comparativeBilanci = mergeComparativeBilanci(
               comparativeBilanci,
-              previousBusinessCache?.financialData?.bilanci,
+              reusableComparativeBilanciFromCache,
               coveredYears,
             );
             hasAnyParsedPeriod = Object.values(comparativeBilanci).some((yearData: any) => yearData?.status === "ok");
@@ -4450,10 +4510,10 @@ export function registerRoutes(server: Server, app: Express): void {
             return failWithRefund(statusCode, failureMessage);
           }
         } catch (error: any) {
-          if (hasUsableBilancioOtticoBusinessCache(previousBusinessCache)) {
+          if (reusableComparativeBilanciFromCache) {
             comparativeBilanci = mergeComparativeBilanci(
               comparativeBilanci,
-              previousBusinessCache?.financialData?.bilanci,
+              reusableComparativeBilanciFromCache,
               coveredYears,
             );
             hasAnyParsedPeriod = Object.values(comparativeBilanci).some((yearData: any) => yearData?.status === "ok");
