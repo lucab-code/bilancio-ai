@@ -488,7 +488,7 @@ export default function HomePage() {
                 return (
                   <Card
                     key={analysis.id}
-                    className="stripe-card-hover group w-full border-border/70 bg-card/88 p-5"
+                    className="stripe-card-hover group w-full border-white/80 bg-white/82 p-5"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
