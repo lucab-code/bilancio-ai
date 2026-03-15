@@ -1,7 +1,10 @@
 import { appConfig } from "@shared/schema";
 
 const CONFIG_KEYS = {
+  AI_PROVIDER: "ai_provider",
+  AI_MODEL: "ai_model",
   OPENAI_API_KEY: "openai_api_key",
+  ANTHROPIC_API_KEY: "anthropic_api_key",
   OPENAPI_BEARER: "openapi_bearer",
   OPENAPI_BEARER_SANDBOX: "openapi_bearer_sandbox",
   OPENAPI_USE_SANDBOX: "openapi_use_sandbox",
@@ -38,7 +41,10 @@ export async function loadConfig(): Promise<void> {
   if (loaded) return;
   const fromDb = await loadFromDb();
   cache = {
+    [CONFIG_KEYS.AI_PROVIDER]: fromDb[CONFIG_KEYS.AI_PROVIDER] ?? process.env.AI_PROVIDER ?? "",
+    [CONFIG_KEYS.AI_MODEL]: fromDb[CONFIG_KEYS.AI_MODEL] ?? process.env.AI_MODEL ?? "",
     [CONFIG_KEYS.OPENAI_API_KEY]: fromDb[CONFIG_KEYS.OPENAI_API_KEY] ?? process.env.OPENAI_API_KEY ?? "",
+    [CONFIG_KEYS.ANTHROPIC_API_KEY]: fromDb[CONFIG_KEYS.ANTHROPIC_API_KEY] ?? process.env.ANTHROPIC_API_KEY ?? "",
     [CONFIG_KEYS.OPENAPI_BEARER]: fromDb[CONFIG_KEYS.OPENAPI_BEARER] ?? process.env.OPENAPI_BEARER ?? "",
     [CONFIG_KEYS.OPENAPI_BEARER_SANDBOX]: fromDb[CONFIG_KEYS.OPENAPI_BEARER_SANDBOX] ?? process.env.OPENAPI_BEARER_SANDBOX ?? "",
     [CONFIG_KEYS.OPENAPI_USE_SANDBOX]: fromDb[CONFIG_KEYS.OPENAPI_USE_SANDBOX] ?? process.env.OPENAPI_USE_SANDBOX ?? "false",
@@ -60,8 +66,57 @@ export async function loadConfig(): Promise<void> {
   loaded = true;
 }
 
+type AiProvider = "openai" | "anthropic";
+
+function normalizeAiProvider(value: string | undefined): AiProvider | null {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (normalized === "anthropic" || normalized === "claude") return "anthropic";
+  if (normalized === "openai" || normalized === "gpt") return "openai";
+  return null;
+}
+
+function inferProviderFromModel(value: string | undefined): AiProvider | null {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (normalized.startsWith("claude-")) return "anthropic";
+  if (normalized.startsWith("gpt-") || normalized.startsWith("o")) return "openai";
+  return null;
+}
+
+export function getAiProvider(): AiProvider {
+  return (
+    normalizeAiProvider(cache[CONFIG_KEYS.AI_PROVIDER]) ||
+    inferProviderFromModel(cache[CONFIG_KEYS.AI_MODEL]) ||
+    inferProviderFromModel(cache[CONFIG_KEYS.OPENAI_CHAT_MODEL]) ||
+    normalizeAiProvider(process.env.AI_PROVIDER) ||
+    inferProviderFromModel(process.env.AI_MODEL) ||
+    inferProviderFromModel(process.env.OPENAI_CHAT_MODEL) ||
+    "openai"
+  );
+}
+
+export function getAiChatModel(): string {
+  const configuredModel =
+    cache[CONFIG_KEYS.AI_MODEL] ||
+    process.env.AI_MODEL ||
+    cache[CONFIG_KEYS.OPENAI_CHAT_MODEL] ||
+    process.env.OPENAI_CHAT_MODEL;
+
+  if (configuredModel?.trim()) return configuredModel.trim();
+  return getAiProvider() === "anthropic" ? "claude-opus-4-6" : "gpt-5.4";
+}
+
+export function getAiApiKey(): string {
+  return getAiProvider() === "anthropic"
+    ? (cache[CONFIG_KEYS.ANTHROPIC_API_KEY] ?? process.env.ANTHROPIC_API_KEY ?? "")
+    : (cache[CONFIG_KEYS.OPENAI_API_KEY] ?? process.env.OPENAI_API_KEY ?? "");
+}
+
+export function getAnthropicApiKey(): string {
+  return cache[CONFIG_KEYS.ANTHROPIC_API_KEY] ?? process.env.ANTHROPIC_API_KEY ?? "";
+}
+
 export function getOpenaiApiKey(): string {
-  return cache[CONFIG_KEYS.OPENAI_API_KEY] ?? "";
+  return getAiApiKey();
 }
 
 export function getOpenapiBearer(): string {
@@ -83,7 +138,7 @@ export function isOpenApiSandbox(): boolean {
 }
 
 export function getOpenaiChatModel(): string {
-  return cache[CONFIG_KEYS.OPENAI_CHAT_MODEL] || "gpt-5.4";
+  return getAiChatModel();
 }
 
 export function getStripeSecretKey(): string {

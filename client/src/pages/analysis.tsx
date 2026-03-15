@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
-import { Search, Building2, Users, MapPin, ArrowLeft, Loader2, Plus, X, Sparkles, UploadCloud, FileText } from "lucide-react";
+import { Search, Building2, Users, MapPin, ArrowLeft, Loader2, Plus, X, Sparkles, UploadCloud, FileText, CreditCard, LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/App";
 import { PoweredByAttribution } from "@/components/PoweredByAttribution";
 import { AppTopBar } from "@/components/AppTopBar";
+import { BilancioLogo } from "@/components/BilancioLogo";
 import { cn } from "@/lib/utils";
 
 // API base for deployed proxy
@@ -292,7 +293,7 @@ export default function AnalysisPage() {
   const [, setLocation] = useLocation();
   const mode = params?.mode as "business" | "competitor";
   const { toast } = useToast();
-  const { token } = useAuth();
+  const { token, user, logout } = useAuth();
 
   // Search state
   const [query, setQuery] = useState("");
@@ -859,6 +860,90 @@ export default function AnalysisPage() {
   const analysisVisualStages = getAnalysisVisualStages(mode, analysisStep);
   const activeAnalysisVisualStage =
     analysisVisualStages.find((stage) => stage.state === "active")?.label || "Setup";
+  const analysisWaitCard = (
+    <Card className="analysis-wait-card relative overflow-hidden border-primary/15 bg-[linear-gradient(160deg,rgba(255,255,255,0.96),rgba(239,244,255,0.9)_58%,rgba(228,242,242,0.92))] p-0 shadow-lg">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="analysis-wait-orb absolute -left-12 top-10 h-28 w-28 rounded-full bg-primary/10 blur-2xl" />
+        <div className="analysis-wait-orb analysis-wait-orb-delay absolute right-0 top-0 h-36 w-36 rounded-full bg-accent/10 blur-3xl" />
+        <div className="analysis-wait-grid absolute inset-0 opacity-40" />
+      </div>
+
+      <div className="relative p-5 sm:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-lg">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary shadow-sm">
+              <span className="analysis-live-dot h-2 w-2 rounded-full bg-primary" />
+              Analysis engine
+            </div>
+            <h3 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+              Stiamo assemblando il memo aziendale
+            </h3>
+            <p key={`${analysisStep}-${waitMessageIndex}`} className="mt-2 text-sm leading-6 text-muted-foreground slide-up">
+              {ANALYSIS_WAIT_MESSAGES[waitMessageIndex]}
+            </p>
+          </div>
+
+          <div className="analysis-engine-visual mx-auto w-full max-w-[320px] lg:mx-0">
+            {analysisVisualStages.map((stage, index) => (
+              <div
+                key={stage.label}
+                data-state={stage.state}
+                className={cn(
+                  "analysis-engine-node",
+                  `analysis-engine-node-${index}`,
+                  stage.state === "active" && "analysis-stage-active",
+                )}
+              >
+                <span className="analysis-engine-node-dot" />
+                <span className="analysis-engine-node-label">{stage.label}</span>
+              </div>
+            ))}
+
+            {[0, 1, 2, 3].map((index) => (
+              <div key={`link-${index}`} className={`analysis-engine-link analysis-engine-link-${index}`} />
+            ))}
+
+            {[0, 1, 2, 3].map((index) => (
+              <div key={`signal-${index}`} className={`analysis-engine-signal analysis-engine-signal-${index}`} aria-hidden="true">
+                <span />
+              </div>
+            ))}
+
+            <div className="analysis-engine-core shadow-sm">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-primary/80">
+                Live stage
+              </div>
+              <div className="mt-2 text-sm font-semibold text-foreground">
+                {activeAnalysisVisualStage}
+              </div>
+            </div>
+
+            <div key={analysisStep} className="analysis-engine-ticker slide-up">
+              {analysisStep}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <div className="mb-2 flex items-center justify-between text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            <span>{analysisProgress}%</span>
+          </div>
+          <div className="h-2.5 overflow-hidden rounded-full bg-slate-200/70">
+            <div
+              className="analysis-progress-bar h-full rounded-full"
+              style={{ width: `${analysisProgress}%` }}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{formatRemainingMinutes(analysisProgressState.remainingSeconds)}</span>
+            {analysisProgressState.isOvertime && (
+              <span>Non e' bloccato, sta ancora elaborando</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
   const getDocumentPreferenceCardClassName = (value: "upload" | "openapi") =>
     cn(
       "group/document relative flex h-full min-h-[280px] flex-col overflow-hidden rounded-[30px] border p-7 text-left transition-all duration-300",
@@ -884,130 +969,174 @@ export default function AnalysisPage() {
               Indietro
             </Button>
             <div className="stripe-topbar-divider hidden sm:block" />
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="stripe-topbar-logo h-10 w-10 rounded-[0.9rem]">
-                {mode === "business" ? (
-                  <Building2 className="h-4 w-4 text-primary" />
-                ) : (
-                  <Users className="h-4 w-4 text-accent" />
-                )}
+            <div className="stripe-topbar-brand">
+              <div className="stripe-topbar-logo">
+                <BilancioLogo className="h-6 w-6 text-primary" />
               </div>
               <div className="min-w-0">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                  Workspace
+                <div className="truncate text-[1.08rem] font-semibold tracking-[-0.05em] text-slate-950">
+                  BilancioAI
                 </div>
-                <div className="truncate text-sm font-semibold text-slate-950">
-                  {mode === "business" ? "Analizza la mia azienda" : "Analisi competitiva"}
+                <div className="hidden text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400 sm:block">
+                  Financial intelligence
                 </div>
               </div>
             </div>
           </>
         )}
-      />
-
-      <div className="stripe-shell mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
-        <div className="mx-auto w-full max-w-5xl">
-        {/* Step 1: Company Search */}
-        <div className="stripe-panel relative mb-8 overflow-visible p-6 sm:p-8 fade-in">
-          <div className="stripe-kicker mb-5">{mode === "business" ? "Company search" : "Competitive map"}</div>
-          <h2 className="text-[32px] font-semibold tracking-[-0.04em] text-slate-950 mb-2">
-            Cerca la tua azienda
-          </h2>
-          <p className="text-sm text-slate-600 mb-5 leading-7">
-            Scrivi nome e localita' nella stessa ricerca, ad esempio `GEL SPA Castelfidardo`.
-          </p>
-
-          <div ref={searchRef} className="relative z-20">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Nome azienda o nome + citta' (es. GEL SPA Castelfidardo)"
-                value={query}
-                onChange={(e) => handleQueryChange(e.target.value)}
-                className="pl-10 pr-12 h-12 text-base"
-                data-testid="input-company-search"
-              />
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {mainSearch.isSearching && (
-                  <div className="flex items-center justify-center w-5 h-5">
-                    <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Dropdown */}
-            {mainSearch.showDropdown && (mainSearch.isSearching || mainSearch.results.length > 0) && (
-              <div className="absolute z-50 w-full mt-1 bg-popover border border-popover-border rounded-lg shadow-lg max-h-80 overflow-y-auto">
-                {mainSearch.results.map((company) => (
-                  <button
-                    key={company.id}
-                    onClick={() => selectCompany(company)}
-                    className="w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
-                    data-testid={`company-result-${company.id}`}
+        right={(
+          <>
+            {token && mode === "business" && (
+              <div className="stripe-topbar-chip hidden sm:inline-flex">
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <CreditCard className="h-4 w-4 text-primary" />
+                  <span className="font-medium text-slate-500">Credito</span>
+                  <span className="font-semibold text-slate-950">
+                    {isLoadingWallet ? "..." : formatCents(walletState?.balanceCents || 0)}
+                  </span>
+                </div>
+                {walletState?.billingEnabled && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-full border-white/90 bg-white px-3 shadow-none"
+                    onClick={() => redirectToCheckout()}
                   >
-                    <div className="font-medium text-sm">{company.denominazione}</div>
-                    {(company.indirizzo || company.comune) && (
-                      <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
-                        <MapPin className="w-3 h-3" />
-                        {[company.indirizzo, company.cap, company.comune, company.provincia].filter(Boolean).join(", ")}
-                      </div>
-                    )}
-                    {company.piva && (
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        P.IVA: {company.piva}
-                      </div>
-                    )}
-                  </button>
-                ))}
-                {mainSearch.isSearching && (
-                  <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground">
-                    <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                    {mainSearch.results.length === 0 ? "Ricerca in corso..." : "Caricamento altri risultati..."}
-                  </div>
-                )}
-                {!mainSearch.isSearching && mainSearch.results.length === 0 && (
-                  <div className="px-4 py-3 text-xs text-muted-foreground">
-                    Nessun risultato trovato. Prova con ragione sociale completa o nome + citta'.
-                  </div>
+                    Ricarica
+                  </Button>
                 )}
               </div>
             )}
-          </div>
+            {user && (
+              <div className="stripe-topbar-chip stripe-topbar-chip-muted max-w-[220px]">
+                <User className="h-4 w-4 shrink-0 text-slate-500" />
+                <span className="truncate text-sm font-medium">{user.name || user.email}</span>
+              </div>
+            )}
+            {user && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={logout}
+                data-testid="button-logout"
+                className="h-11 w-11 rounded-2xl border border-white/80 bg-white/82 p-0 text-slate-600 shadow-[0_18px_34px_-30px_rgba(15,23,42,0.24)] hover:bg-white hover:text-slate-950"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            )}
+          </>
+        )}
+      />
 
-          {/* Selected company card */}
-          {selectedCompany && (
-            <Card className="mt-4 p-4 border-primary/30 bg-primary/5 fade-in">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-semibold text-sm">{selectedCompany.denominazione}</div>
-                  {selectedCompany.indirizzo && (
-                    <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
-                      <MapPin className="w-3 h-3" />
-                      {[selectedCompany.indirizzo, selectedCompany.cap, selectedCompany.comune, selectedCompany.provincia].filter(Boolean).join(", ")}
+      <div className="stripe-shell mx-auto w-full max-w-[75rem] px-4 py-8 sm:px-6 sm:py-10">
+        <div className="mx-auto w-full">
+        {isAnalyzing ? (
+          <div className="fade-in">{analysisWaitCard}</div>
+        ) : (
+          <>
+        {/* Step 1: Company Search */}
+        <div className="stripe-panel stripe-subtle-grid relative mb-8 overflow-visible px-6 py-6 sm:px-8 sm:py-8 fade-in">
+          <div className="stripe-hero-card relative overflow-visible rounded-[32px] p-8 sm:p-10">
+            <div className="stripe-kicker mb-5">{mode === "business" ? "Company search" : "Competitive map"}</div>
+            <h2 className="text-[32px] font-semibold tracking-[-0.04em] text-slate-950 mb-2">
+              Cerca la tua azienda
+            </h2>
+            <p className="text-sm text-slate-600 mb-5 leading-7">
+              Scrivi nome e localita' nella stessa ricerca, ad esempio `GEL SPA Castelfidardo`.
+            </p>
+
+            <div ref={searchRef} className="relative z-20">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Nome azienda o nome + citta' (es. GEL SPA Castelfidardo)"
+                  value={query}
+                  onChange={(e) => handleQueryChange(e.target.value)}
+                  className="pl-10 pr-12 h-12 text-base"
+                  data-testid="input-company-search"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {mainSearch.isSearching && (
+                    <div className="flex items-center justify-center w-5 h-5">
+                      <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
                     </div>
                   )}
-                  {selectedCompany.piva && (
-                    <div className="text-xs text-muted-foreground mt-1">P.IVA: {selectedCompany.piva}</div>
+                </div>
+              </div>
+
+              {/* Dropdown */}
+              {mainSearch.showDropdown && (mainSearch.isSearching || mainSearch.results.length > 0) && (
+                <div className="absolute z-50 w-full mt-1 bg-popover border border-popover-border rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                  {mainSearch.results.map((company) => (
+                    <button
+                      key={company.id}
+                      onClick={() => selectCompany(company)}
+                      className="w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
+                      data-testid={`company-result-${company.id}`}
+                    >
+                      <div className="font-medium text-sm">{company.denominazione}</div>
+                      {(company.indirizzo || company.comune) && (
+                        <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+                          <MapPin className="w-3 h-3" />
+                          {[company.indirizzo, company.cap, company.comune, company.provincia].filter(Boolean).join(", ")}
+                        </div>
+                      )}
+                      {company.piva && (
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          P.IVA: {company.piva}
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                  {mainSearch.isSearching && (
+                    <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground">
+                      <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                      {mainSearch.results.length === 0 ? "Ricerca in corso..." : "Caricamento altri risultati..."}
+                    </div>
                   )}
-                  {selectedCompany.stato_attivita && (
-                    <Badge variant="outline" className="mt-2 text-xs">
-                      {selectedCompany.stato_attivita}
-                    </Badge>
+                  {!mainSearch.isSearching && mainSearch.results.length === 0 && (
+                    <div className="px-4 py-3 text-xs text-muted-foreground">
+                      Nessun risultato trovato. Prova con ragione sociale completa o nome + citta'.
+                    </div>
                   )}
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { setSelectedCompany(null); setQuery(""); }}
-                  data-testid="button-clear-company"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            </Card>
-          )}
+              )}
+            </div>
+
+            {/* Selected company card */}
+            {selectedCompany && (
+              <Card className="mt-4 p-4 border-primary/30 bg-primary/5 fade-in">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="font-semibold text-sm">{selectedCompany.denominazione}</div>
+                    {selectedCompany.indirizzo && (
+                      <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+                        <MapPin className="w-3 h-3" />
+                        {[selectedCompany.indirizzo, selectedCompany.cap, selectedCompany.comune, selectedCompany.provincia].filter(Boolean).join(", ")}
+                      </div>
+                    )}
+                    {selectedCompany.piva && (
+                      <div className="text-xs text-muted-foreground mt-1">P.IVA: {selectedCompany.piva}</div>
+                    )}
+                    {selectedCompany.stato_attivita && (
+                      <Badge variant="outline" className="mt-2 text-xs">
+                        {selectedCompany.stato_attivita}
+                      </Badge>
+                    )}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setSelectedCompany(null); setQuery(""); }}
+                    data-testid="button-clear-company"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </Card>
+            )}
+          </div>
         </div>
 
         {mode === "business" && selectedCompany && (
@@ -1294,115 +1423,23 @@ export default function AnalysisPage() {
               className="w-full min-h-16 rounded-[30px] text-[1.05rem] font-semibold tracking-[-0.02em] shadow-[0_30px_80px_-34px_rgba(99,91,255,0.68)]"
               data-testid="button-start-analysis"
             >
-              {isAnalyzing ? (
-                <>
-                  <span className="analysis-button-signal mr-1" aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                  <span className="truncate">{analysisStep}</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  {mode === "business" && !canStartBusinessAnalysis ? "Carica almeno un bilancio per continuare" : "Avvia analisi"}
-                </>
-              )}
+              <>
+                <Sparkles className="w-4 h-4 mr-2" />
+                {mode === "business" && !canStartBusinessAnalysis ? "Carica almeno un bilancio per continuare" : "Avvia analisi"}
+              </>
             </Button>
-
-            {isAnalyzing && (
-              <Card className="analysis-wait-card relative mt-4 overflow-hidden border-primary/15 bg-[linear-gradient(160deg,rgba(255,255,255,0.96),rgba(239,244,255,0.9)_58%,rgba(228,242,242,0.92))] p-0 shadow-lg">
-                <div className="pointer-events-none absolute inset-0">
-                  <div className="analysis-wait-orb absolute -left-12 top-10 h-28 w-28 rounded-full bg-primary/10 blur-2xl" />
-                  <div className="analysis-wait-orb analysis-wait-orb-delay absolute right-0 top-0 h-36 w-36 rounded-full bg-accent/10 blur-3xl" />
-                  <div className="analysis-wait-grid absolute inset-0 opacity-40" />
-                </div>
-
-                <div className="relative p-5 sm:p-6">
-                  <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="max-w-lg">
-                      <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary shadow-sm">
-                        <span className="analysis-live-dot h-2 w-2 rounded-full bg-primary" />
-                        Analysis engine
-                      </div>
-                      <h3 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
-                        Stiamo assemblando il memo aziendale
-                      </h3>
-                      <p key={`${analysisStep}-${waitMessageIndex}`} className="mt-2 text-sm leading-6 text-muted-foreground slide-up">
-                        {ANALYSIS_WAIT_MESSAGES[waitMessageIndex]}
-                      </p>
-                    </div>
-
-                    <div className="analysis-engine-visual mx-auto w-full max-w-[320px] lg:mx-0">
-                      {analysisVisualStages.map((stage, index) => (
-                        <div
-                          key={stage.label}
-                          data-state={stage.state}
-                          className={cn(
-                            "analysis-engine-node",
-                            `analysis-engine-node-${index}`,
-                            stage.state === "active" && "analysis-stage-active",
-                          )}
-                        >
-                          <span className="analysis-engine-node-dot" />
-                          <span className="analysis-engine-node-label">{stage.label}</span>
-                        </div>
-                      ))}
-
-                      {[0, 1, 2, 3].map((index) => (
-                        <div key={`link-${index}`} className={`analysis-engine-link analysis-engine-link-${index}`} />
-                      ))}
-
-                      {[0, 1, 2, 3].map((index) => (
-                        <div key={`signal-${index}`} className={`analysis-engine-signal analysis-engine-signal-${index}`} aria-hidden="true">
-                          <span />
-                        </div>
-                      ))}
-
-                      <div className="analysis-engine-core shadow-sm">
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-primary/80">
-                          Live stage
-                        </div>
-                        <div className="mt-2 text-sm font-semibold text-foreground">
-                          {activeAnalysisVisualStage}
-                        </div>
-                      </div>
-
-                      <div key={analysisStep} className="analysis-engine-ticker slide-up">
-                        {analysisStep}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-5">
-                    <div className="mb-2 flex items-center justify-between text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                      <span>{analysisProgress}%</span>
-                    </div>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200/70">
-                      <div
-                        className="analysis-progress-bar h-full rounded-full"
-                        style={{ width: `${analysisProgress}%` }}
-                      />
-                    </div>
-                    <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                      <span>{formatRemainingMinutes(analysisProgressState.remainingSeconds)}</span>
-                      {analysisProgressState.isOvertime && (
-                        <span>Non e' bloccato, sta ancora elaborando</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            )}
           </div>
+        )}
+          </>
         )}
         </div>
       </div>
 
-      <footer className="border-t border-border/50 py-6 px-6 mt-auto text-center">
-        <PoweredByAttribution />
-      </footer>
+      {!isAnalyzing && (
+        <footer className="border-t border-border/50 py-6 px-6 mt-auto text-center">
+          <PoweredByAttribution />
+        </footer>
+      )}
     </div>
   );
 }

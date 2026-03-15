@@ -1931,7 +1931,8 @@ export default function ResultsPage() {
       />
 
       {/* Content */}
-      <div className="stripe-shell max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <div className="stripe-shell max-w-6xl mx-auto px-4 sm:px-6 py-6">
+        <div className="mx-auto w-full max-w-5xl space-y-6">
 
         {isBusinessMode && (
           <div className="stripe-panel px-6 py-8 sm:px-8">
@@ -2517,6 +2518,7 @@ export default function ResultsPage() {
           </PremiumGate>
         )}
 
+        </div>
       </div>
 
       <footer className="border-t border-border/50 py-6 px-6 mt-8">

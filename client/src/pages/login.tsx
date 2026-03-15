@@ -29,6 +29,8 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [name, setName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const authInputClassName =
+    "h-16 rounded-2xl border-white/85 bg-white/88 px-6 text-lg shadow-[0_18px_38px_-30px_rgba(15,23,42,0.22)] transition-all duration-200 placeholder:text-slate-400 hover:border-primary/25 hover:shadow-[0_22px_42px_-30px_rgba(99,91,255,0.18)] focus-visible:border-primary/35 focus-visible:ring-primary/20";
 
   // Supabase può reindirizzare con hash (#) - la sessione viene rilevata da onAuthStateChange in App
   useEffect(() => {
@@ -149,6 +151,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
                       placeholder="Il tuo nome"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
+                      className={authInputClassName}
                       data-testid="input-name"
                     />
                   </div>
@@ -162,6 +165,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
+                    className={authInputClassName}
                     data-testid="input-email"
                   />
                 </div>
@@ -175,6 +179,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     minLength={6}
+                    className={authInputClassName}
                     data-testid="input-password"
                   />
                 </div>
