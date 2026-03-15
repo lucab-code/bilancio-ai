@@ -261,6 +261,7 @@ export default function HomePage() {
   return (
     <div className="stripe-page min-h-screen bg-background">
       <AppTopBar
+        maxWidthClassName="max-w-[75rem]"
         left={(
           <div className="stripe-topbar-brand">
             <div className="stripe-topbar-logo">
@@ -546,7 +547,7 @@ export default function HomePage() {
               })}
             </div>
           ) : (
-            <Card className="border-dashed border-border/70 bg-card/75 p-6">
+            <Card className="stripe-hero-card rounded-[32px] p-6">
               <div className="flex flex-col gap-2">
                 <div className="text-sm font-medium text-foreground">Nessuna societa' analizzata ancora</div>
                 <p className="text-sm text-muted-foreground">
