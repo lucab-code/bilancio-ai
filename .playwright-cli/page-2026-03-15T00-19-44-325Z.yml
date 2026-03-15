@@ -1,0 +1,36 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Accesso
+        - heading "Bilanci, benchmark e memo AI in un'unica vista." [level=1] [ref=e8]
+        - paragraph [ref=e9]: Un'interfaccia piu' chiara per leggere la cassa, confrontare il mercato e trasformare numeri grezzi in decisioni.
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - generic [ref=e12]:
+            - img "BilancioAI Logo" [ref=e13]
+            - generic [ref=e20]: BilancioAI
+          - generic [ref=e21]: Accedi
+        - generic [ref=e22]:
+          - generic [ref=e23]:
+            - generic [ref=e24]:
+              - text: Email
+              - textbox "Email" [ref=e25]:
+                - /placeholder: email@esempio.it
+                - text: codex.test.1773533896@example.com
+            - generic [ref=e26]:
+              - text: Password
+              - textbox "Password" [ref=e27]:
+                - /placeholder: ••••••••
+                - text: CodexTest!2026
+            - button "Accedi" [ref=e28] [cursor=pointer]:
+              - img
+              - text: Accedi
+            - generic [ref=e33]: oppure
+            - button "Accedi con Google" [ref=e34] [cursor=pointer]:
+              - img
+              - text: Accedi con Google
+          - button "Non hai un account? Registrati" [ref=e36] [cursor=pointer]
+    - generic [ref=e38]: Powered by LB Investments
+  - region "Notifications (F8)":
+    - list
