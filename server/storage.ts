@@ -1,6 +1,6 @@
 import type { Analysis, InsertAnalysis, User, InsertUser, UserUploadedBilancio } from "@shared/schema";
 import { users, analyses, sessions, bilanciCache, companyDetailsCache, companyFullCache, userUploadedBilanci } from "@shared/schema";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
 import { getDb } from "./db";
@@ -460,6 +460,7 @@ export class SupabaseStorage implements IStorage {
       .select()
       .from(bilanciCache)
       .where(eq(bilanciCache.companyId, companyId))
+      .orderBy(desc(bilanciCache.updatedAt))
       .limit(1);
     return row;
   }
@@ -469,6 +470,7 @@ export class SupabaseStorage implements IStorage {
       .select()
       .from(bilanciCache)
       .where(eq(bilanciCache.taxCode, taxCode))
+      .orderBy(desc(bilanciCache.updatedAt))
       .limit(1);
     return row;
   }
@@ -478,6 +480,7 @@ export class SupabaseStorage implements IStorage {
       .select()
       .from(companyFullCache)
       .where(eq(companyFullCache.companyId, companyId))
+      .orderBy(desc(companyFullCache.updatedAt))
       .limit(1);
     return row;
   }
@@ -487,6 +490,7 @@ export class SupabaseStorage implements IStorage {
       .select()
       .from(companyFullCache)
       .where(eq(companyFullCache.taxCode, taxCode))
+      .orderBy(desc(companyFullCache.updatedAt))
       .limit(1);
     return row;
   }

@@ -4195,6 +4195,55 @@ export function registerRoutes(server: Server, app: Express): void {
         return res.status(statusCode).json({ error: errorMessage });
       };
 
+      const previousBusinessCache =
+        (normalizedTaxCode ? await storage.getCachedCompanyFullDataByTaxCode(normalizedTaxCode) : undefined) ||
+        (normalizedVatCode ? await storage.getCachedCompanyFullDataByTaxCode(normalizedVatCode) : undefined) ||
+        (await storage.getCachedCompanyFullData(normalizedCompanyId)) ||
+        (await findReusableBusinessSnapshot(
+          normalizedCompanyId,
+          [normalizedTaxCode, normalizedVatCode].filter((value): value is string => Boolean(value)),
+        ));
+      const reusableBusinessResult =
+        documentPreference === "openapi" &&
+        previousBusinessCache?.companyDetails &&
+        previousBusinessCache?.financialData &&
+        hasUsableBilancioOtticoBusinessCache(previousBusinessCache) &&
+        previousBusinessCache?.companyDetails?.aiDescriptionVersion === COMPANY_DESCRIPTION_WEB_VERSION &&
+        previousBusinessCache?.financialData?.insightsVersion === BUSINESS_INSIGHTS_VERSION;
+
+      if (reusableBusinessResult) {
+        const cachedResult = {
+          companyDetails: previousBusinessCache.companyDetails,
+          financialData: previousBusinessCache.financialData,
+          insights:
+            previousBusinessCache?.insights ||
+            previousBusinessCache?.financialData?.insights ||
+            null,
+          documentSource:
+            previousBusinessCache?.documentSource ||
+            previousBusinessCache?.financialData?.documentSource ||
+            "openapi",
+        };
+
+        await createAnalysisHistoryEntry({
+          userId,
+          mode: "business",
+          companyName: previousBusinessCache?.companyDetails?.denominazione || normalizedCompanyId,
+          companyId: normalizedCompanyId,
+          taxCode:
+            previousBusinessCache?.companyDetails?.codice_fiscale ||
+            previousBusinessCache?.companyDetails?.partita_iva ||
+            normalizedTaxCode ||
+            normalizedVatCode ||
+            null,
+          address: previousBusinessCache?.companyDetails?.indirizzo || null,
+          companyDetails: cachedResult.companyDetails,
+          financialData: cachedResult.financialData,
+        });
+
+        return res.json({ data: cachedResult });
+      }
+
       if (isCreditBillingEnabled()) {
         // Subscribers: consume from subscription first, then wallet for extras
         const tier = await getUserTier(userId);
@@ -4230,15 +4279,6 @@ export function registerRoutes(server: Server, app: Express): void {
           businessChargeApplied = true;
         }
       }
-
-      const previousBusinessCache =
-        (normalizedTaxCode ? await storage.getCachedCompanyFullDataByTaxCode(normalizedTaxCode) : undefined) ||
-        (normalizedVatCode ? await storage.getCachedCompanyFullDataByTaxCode(normalizedVatCode) : undefined) ||
-        (await storage.getCachedCompanyFullData(normalizedCompanyId)) ||
-        (await findReusableBusinessSnapshot(
-          normalizedCompanyId,
-          [normalizedTaxCode, normalizedVatCode].filter((value): value is string => Boolean(value)),
-        ));
 
       // --- 1. IT-advanced: dettagli azienda e anni disponibili ---
       let companyDetails: any =
