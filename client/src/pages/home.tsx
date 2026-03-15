@@ -582,7 +582,7 @@ export default function HomePage() {
                 desc: "Leggi in pochi minuti circolante, debito e priorità operative invece di fermarti ai numeri grezzi.",
               },
             ].map((f, i) => (
-              <div key={i} className="stripe-card-hover rounded-[28px] border border-white/80 bg-white/82 p-6 text-center fade-in" style={{ animationDelay: `${i * 100}ms` }}>
+              <div key={i} className="stripe-card-hover stripe-hero-card rounded-[32px] p-6 text-center fade-in" style={{ animationDelay: `${i * 100}ms` }}>
                 <div className="w-12 h-12 rounded-2xl bg-[linear-gradient(135deg,rgba(99,91,255,0.12),rgba(10,132,255,0.1))] flex items-center justify-center mx-auto mb-4 text-foreground">
                   {f.icon}
                 </div>
