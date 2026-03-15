@@ -4552,25 +4552,83 @@ export function registerRoutes(server: Server, app: Express): void {
         fetchedAt: new Date().toISOString(),
       };
 
-      const descriptionPayload = await generatePrivateEquityCompanyDescription(companyDetails, financialData);
-      const marketBenchmarks = await generateMarketBenchmarks(
-        companyDetails,
-        financialData,
-        descriptionPayload.description,
+      const reusableDescription =
+        reusableComparativeBilanciFromCache &&
+        previousBusinessCache?.companyDetails?.aiDescriptionVersion === COMPANY_DESCRIPTION_WEB_VERSION &&
+        typeof previousBusinessCache?.companyDetails?.aiDescription === "string" &&
+        previousBusinessCache.companyDetails.aiDescription.trim()
+          ? {
+              description: previousBusinessCache.companyDetails.aiDescription,
+              sources: Array.isArray(previousBusinessCache.companyDetails.aiDescriptionSources)
+                ? previousBusinessCache.companyDetails.aiDescriptionSources
+                : [],
+              keyProducts: Array.isArray(previousBusinessCache.companyDetails.aiKeyProducts)
+                ? previousBusinessCache.companyDetails.aiKeyProducts
+                : [],
+              version: previousBusinessCache.companyDetails.aiDescriptionVersion,
+            }
+          : null;
+      const previousInsights =
+        previousBusinessCache?.financialData?.insights && typeof previousBusinessCache.financialData.insights === "object"
+          ? previousBusinessCache.financialData.insights
+          : previousBusinessCache?.insights && typeof previousBusinessCache.insights === "object"
+            ? previousBusinessCache.insights
+            : null;
+      const reusableInsights =
+        reusableComparativeBilanciFromCache &&
+        previousBusinessCache?.financialData?.insightsVersion === BUSINESS_INSIGHTS_VERSION &&
+        previousInsights
+          ? previousInsights
+          : null;
+      const fallbackInsights = buildFallbackInsights(financialData);
+      const descriptionPayload = reusableDescription || {
+        description: buildFallbackCompanyDescription(companyDetails, financialData),
+        sources: [] as Array<{ title: string; url: string }>,
+        keyProducts: [] as Array<{ name: string; tagline: string | null; imageUrl: string | null; pageUrl: string | null }>,
+        version: COMPANY_DESCRIPTION_WEB_VERSION,
+      };
+      if (!reusableComparativeBilanciFromCache) {
+        Object.assign(descriptionPayload, await generatePrivateEquityCompanyDescription(companyDetails, financialData));
+      }
+
+      const marketBenchmarks = reusableInsights?.marketBenchmarks || (
+        reusableComparativeBilanciFromCache
+          ? fallbackInsights.marketBenchmarks
+          : await generateMarketBenchmarks(
+              companyDetails,
+              financialData,
+              descriptionPayload.description,
+            )
       );
-      const recommendationPayload = await generateWorkingCapitalDebtAndRecommendations(
-        companyDetails,
-        financialData,
-        marketBenchmarks,
-        descriptionPayload.description,
-      );
-      const ceoBrief = await generateBusinessCeoBrief(
-        companyDetails,
-        financialData,
-        marketBenchmarks,
-        recommendationPayload.workingCapitalDebt,
-        recommendationPayload.recommendations,
-        descriptionPayload.description,
+      const recommendationPayload = reusableInsights
+        ? {
+            workingCapitalDebt: reusableInsights.workingCapitalDebt || fallbackInsights.workingCapitalDebt,
+            recommendations: Array.isArray(reusableInsights.recommendations)
+              ? reusableInsights.recommendations
+              : fallbackInsights.recommendations,
+          }
+        : reusableComparativeBilanciFromCache
+          ? {
+              workingCapitalDebt: fallbackInsights.workingCapitalDebt,
+              recommendations: fallbackInsights.recommendations,
+            }
+          : await generateWorkingCapitalDebtAndRecommendations(
+              companyDetails,
+              financialData,
+              marketBenchmarks,
+              descriptionPayload.description,
+            );
+      const ceoBrief = reusableInsights?.ceoBrief || (
+        reusableComparativeBilanciFromCache
+          ? fallbackInsights.ceoBrief
+          : await generateBusinessCeoBrief(
+              companyDetails,
+              financialData,
+              marketBenchmarks,
+              recommendationPayload.workingCapitalDebt,
+              recommendationPayload.recommendations,
+              descriptionPayload.description,
+            )
       );
       const insights = {
         version: BUSINESS_INSIGHTS_VERSION,
