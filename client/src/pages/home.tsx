@@ -445,7 +445,7 @@ export default function HomePage() {
       </section>
 
       <section className="stripe-shell px-6 py-6">
-        <div className="stripe-panel stripe-subtle-grid mx-auto max-w-5xl px-6 py-8 sm:px-8">
+        <div className="stripe-panel stripe-subtle-grid mx-auto max-w-6xl px-6 py-8 sm:px-8">
           <div className="mb-6 flex items-end justify-between gap-3">
             <div>
               <div className="mb-2 stripe-kicker">
@@ -560,7 +560,7 @@ export default function HomePage() {
 
       {/* Features */}
       <section className="stripe-shell px-6 py-16">
-        <div className="stripe-panel stripe-subtle-grid mx-auto max-w-5xl px-6 py-10 sm:px-8">
+        <div className="stripe-panel stripe-subtle-grid mx-auto max-w-6xl px-6 py-10 sm:px-8">
           <h3 className="text-center text-sm font-medium text-muted-foreground uppercase tracking-[0.24em] mb-10">
             Come funziona
           </h3>
