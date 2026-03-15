@@ -105,7 +105,7 @@ export default function PricingPage() {
   return (
     <div className="stripe-page min-h-screen bg-background">
       <AppTopBar
-        maxWidthClassName="max-w-5xl"
+        maxWidthClassName="max-w-[75rem]"
         left={(
           <>
             <Button
@@ -128,7 +128,7 @@ export default function PricingPage() {
         )}
       />
 
-      <div className="stripe-shell mx-auto max-w-5xl px-4 py-12 sm:px-6">
+      <div className="stripe-shell mx-auto max-w-6xl px-4 py-12 sm:px-6">
         <div className="stripe-panel mb-12 px-6 py-10 text-center sm:px-10 sm:py-14">
           <div className="stripe-kicker mb-6">Pricing</div>
           <h1 className="stripe-display text-[clamp(2.4rem,3vw,4rem)]">Scegli il piano giusto per te</h1>
@@ -137,7 +137,7 @@ export default function PricingPage() {
           </p>
         </div>
 
-        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-5 md:grid-cols-2">
+        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 md:grid-cols-2">
           {PLANS.map((plan) => {
             const Icon = plan.icon;
             return (

@@ -1901,7 +1901,7 @@ export default function ResultsPage() {
   return (
     <div className="stripe-page min-h-screen bg-background">
       <AppTopBar
-        maxWidthClassName="max-w-3xl"
+        maxWidthClassName="max-w-[75rem]"
         left={(
           <>
             <Button
@@ -1931,7 +1931,7 @@ export default function ResultsPage() {
       />
 
       {/* Content */}
-      <div className="stripe-shell max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <div className="stripe-shell max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
         {isBusinessMode && (
           <div className="stripe-panel px-6 py-8 sm:px-8">
@@ -2520,7 +2520,7 @@ export default function ResultsPage() {
       </div>
 
       <footer className="border-t border-border/50 py-6 px-6 mt-8">
-        <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+        <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
           <p className="text-xs text-muted-foreground md:text-left text-center order-2 md:order-1">
             Dati forniti da Camera di Commercio tramite OpenAPI.it
           </p>

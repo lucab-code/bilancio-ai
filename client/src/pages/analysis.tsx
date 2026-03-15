@@ -870,7 +870,7 @@ export default function AnalysisPage() {
   return (
     <div className="stripe-page min-h-screen bg-background">
       <AppTopBar
-        maxWidthClassName="max-w-5xl"
+        maxWidthClassName="max-w-[75rem]"
         left={(
           <>
             <Button
@@ -905,8 +905,8 @@ export default function AnalysisPage() {
         )}
       />
 
-      <div className="stripe-shell mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
-        <div className="mx-auto w-full max-w-4xl">
+      <div className="stripe-shell mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+        <div className="mx-auto w-full max-w-5xl">
         {/* Step 1: Company Search */}
         <div className="stripe-panel relative mb-8 overflow-visible p-6 sm:p-8 fade-in">
           <div className="stripe-kicker mb-5">{mode === "business" ? "Company search" : "Competitive map"}</div>
