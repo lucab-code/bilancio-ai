@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/App";
 import { PoweredByAttribution } from "@/components/PoweredByAttribution";
 import { AppTopBar } from "@/components/AppTopBar";
-import { cn } from "@/lib/utils";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
@@ -210,12 +209,6 @@ export default function HomePage() {
 
     return Array.from(deduped.values()).slice(0, 6);
   }, [savedAnalyses]);
-
-  const recentCompaniesGridClassName = useMemo(() => {
-    if (recentCompanies.length <= 1) return "grid-cols-1";
-    if (recentCompanies.length === 2) return "md:grid-cols-2";
-    return "md:grid-cols-2 xl:grid-cols-3";
-  }, [recentCompanies.length]);
 
   const openSavedAnalysis = (analysis: SavedAnalysis) => {
     (window as any).__bilancioResults = buildResultDataFromAnalysis(analysis);
@@ -482,7 +475,7 @@ export default function HomePage() {
               ))}
             </div>
           ) : recentCompanies.length > 0 ? (
-            <div className={cn("grid gap-4", recentCompaniesGridClassName)}>
+            <div className="space-y-4">
               {recentCompanies.map((analysis) => {
                 const coveredYears = Array.isArray(analysis.financialData?.coveredYears)
                   ? analysis.financialData.coveredYears
@@ -495,7 +488,7 @@ export default function HomePage() {
                 return (
                   <Card
                     key={analysis.id}
-                    className="stripe-card-hover group border-border/70 bg-card/88 p-5"
+                    className="stripe-card-hover group w-full border-border/70 bg-card/88 p-5"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
