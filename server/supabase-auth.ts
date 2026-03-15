@@ -34,12 +34,21 @@ export async function getOrCreateUserFromSupabaseToken(
 
   let user = await storage.getUserByAuthId(authId);
   if (!user) {
-    user = await storage.createUser({
-      authId,
-      email: email || `user-${authId}@supabase.local`,
-      passwordHash: OAUTH_PASSWORD_PLACEHOLDER,
-      name,
-    });
+    const existingByEmail = email ? await storage.getUserByEmail(email) : undefined;
+
+    if (existingByEmail) {
+      user =
+        existingByEmail.authId === authId
+          ? existingByEmail
+          : (await storage.updateUserAuthId(existingByEmail.id, authId)) ?? existingByEmail;
+    } else {
+      user = await storage.createUser({
+        authId,
+        email: email || `user-${authId}@supabase.local`,
+        passwordHash: OAUTH_PASSWORD_PLACEHOLDER,
+        name,
+      });
+    }
   }
   return { id: user.id, email: user.email, name: user.name ?? undefined };
 }

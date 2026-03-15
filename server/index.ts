@@ -158,8 +158,8 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "3000", 10);
-  // Bind to 127.0.0.1 for private access (only this machine). Use 0.0.0.0 to allow LAN/remote.
-  const host = process.env.HOST || "127.0.0.1";
+  // In production/platform environments (e.g. Railway) the server must bind to 0.0.0.0.
+  const host = process.env.HOST || "0.0.0.0";
   httpServer.listen(
     {
       port,

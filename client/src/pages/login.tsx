@@ -86,9 +86,11 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
       toast({ title: "Auth non configurata (Supabase)", variant: "destructive" });
       return;
     }
+
+    const callbackUrl = new URL("/auth/callback", window.location.origin);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: callbackUrl.toString() },
     });
     if (error) toast({ title: error.message, variant: "destructive" });
   };

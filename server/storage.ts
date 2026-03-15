@@ -11,6 +11,7 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserById(id: number): Promise<User | undefined>;
   getUserByAuthId(authId: string): Promise<User | undefined>;
+  updateUserAuthId(userId: number, authId: string): Promise<User | undefined>;
 
   // Analyses
   createAnalysis(data: InsertAnalysis): Promise<Analysis>;
@@ -231,6 +232,14 @@ export class FileStorage implements IStorage {
 
   async getUserByAuthId(authId: string): Promise<User | undefined> {
     return this.userData.users.find(u => u.authId === authId);
+  }
+
+  async updateUserAuthId(userId: number, authId: string): Promise<User | undefined> {
+    const user = this.userData.users.find((entry) => entry.id === userId);
+    if (!user) return undefined;
+    user.authId = authId;
+    this.saveUsers();
+    return user;
   }
 
   // Analyses
@@ -522,6 +531,15 @@ export class SupabaseStorage implements IStorage {
 
   async getUserByAuthId(authId: string): Promise<User | undefined> {
     const [row] = await getDb().select().from(users).where(eq(users.authId, authId)).limit(1);
+    return row as User | undefined;
+  }
+
+  async updateUserAuthId(userId: number, authId: string): Promise<User | undefined> {
+    const [row] = await getDb()
+      .update(users)
+      .set({ authId })
+      .where(eq(users.id, userId))
+      .returning();
     return row as User | undefined;
   }
 

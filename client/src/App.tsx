@@ -82,7 +82,42 @@ function App() {
       }
     };
 
-    const runAuth = async () => {
+    const clearAuthCallbackUrl = () => {
+      const nextPath = window.location.pathname === "/auth/callback" ? "/" : window.location.pathname;
+      window.history.replaceState(null, "", `${nextPath}${window.location.search.includes("billing=") ? window.location.search : ""}#/`);
+    };
+
+    const consumeAuthRedirect = async (): Promise<boolean> => {
+      const searchParams = new URLSearchParams(window.location.search);
+      const oauthCode = searchParams.get("code");
+      const oauthError = searchParams.get("error_description") || searchParams.get("error");
+
+      if (oauthError) {
+        console.error("Supabase OAuth callback error:", oauthError);
+        clearAuthCallbackUrl();
+        return false;
+      }
+
+      if (oauthCode) {
+        try {
+          const { error } = await sb.auth.exchangeCodeForSession(window.location.href);
+          if (error) {
+            console.error("Supabase exchangeCodeForSession failed:", error);
+            clearAuthCallbackUrl();
+            return false;
+          }
+
+          clearAuthCallbackUrl();
+          const { data: { session } } = await sb.auth.getSession();
+          await syncUser(session?.access_token ?? null);
+          return true;
+        } catch (error) {
+          console.error("Supabase OAuth callback exchange threw:", error);
+          clearAuthCallbackUrl();
+          return false;
+        }
+      }
+
       const hash = window.location.hash.replace(/^#/, "");
       const params = new URLSearchParams(hash);
       const accessToken = params.get("access_token");
@@ -92,13 +127,28 @@ function App() {
         try {
           const { error } = await sb.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
           if (!error) {
-            window.history.replaceState(null, "", window.location.pathname + (window.location.search || "") + "#/");
+            clearAuthCallbackUrl();
             const { data: { session } } = await sb.auth.getSession();
             await syncUser(session?.access_token ?? null);
-            return;
+            return true;
           }
-        } catch (_) {}
+        } catch (error) {
+          console.error("Supabase OAuth hash session restore failed:", error);
+        }
       }
+
+      return false;
+    };
+
+    const runAuth = async () => {
+      if (await consumeAuthRedirect()) {
+        return;
+      }
+
+      const hash = window.location.hash.replace(/^#/, "");
+      const params = new URLSearchParams(hash);
+      const accessToken = params.get("access_token");
+      const refreshToken = params.get("refresh_token");
 
       const { data: { session } } = await sb.auth.getSession();
       await syncUser(session?.access_token ?? null);
